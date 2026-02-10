@@ -11,9 +11,17 @@ import Carbon
 final class HotKeyManager {
     static let shared = HotKeyManager()
     private var hotKeyRef: EventHotKeyRef?
+    private var eventHandlerRef: EventHandlerRef?
     private static var callback: (() -> Void)?
 
-    func register(onTrigger: @escaping () -> Void) {
+    func register(
+        keyCode: Int = kVK_Space,
+        modifiers: Int = cmdKey | optionKey,
+        onTrigger: @escaping () -> Void
+    ) {
+        // Unregister existing hotkey first
+        unregister()
+
         HotKeyManager.callback = onTrigger
 
         var eventHotKeyID = EventHotKeyID(
@@ -21,10 +29,9 @@ final class HotKeyManager {
             id: 1
         )
 
-        // ⌘ + ⌥ + Space
         RegisterEventHotKey(
-            UInt32(kVK_Space),
-            UInt32(cmdKey | optionKey),
+            UInt32(keyCode),
+            UInt32(modifiers),
             eventHotKeyID,
             GetEventDispatcherTarget(),
             0,
@@ -47,8 +54,19 @@ final class HotKeyManager {
             1,
             [eventType],
             nil,
-            nil
+            &eventHandlerRef
         )
+    }
+
+    func unregister() {
+        if let hotKeyRef = hotKeyRef {
+            UnregisterEventHotKey(hotKeyRef)
+            self.hotKeyRef = nil
+        }
+        if let eventHandlerRef = eventHandlerRef {
+            RemoveEventHandler(eventHandlerRef)
+            self.eventHandlerRef = nil
+        }
     }
 }
 
