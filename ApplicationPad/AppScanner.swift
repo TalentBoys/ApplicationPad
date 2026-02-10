@@ -13,7 +13,8 @@ struct AppItem: Identifiable {
     let name: String
     let url: URL
     let icon: NSImage
-    let pinyinName: String
+    let pinyinName: String      // 完整拼音: wangyiyoudaocidian
+    let pinyinInitials: String  // 首字母: wyydcd
 
     var lastUsed: Date {
         UserDefaults.standard.object(forKey: url.path) as? Date ?? .distantPast
@@ -47,7 +48,8 @@ final class AppScanner {
                 let name = url.deletingPathExtension().lastPathComponent
                 let icon = NSWorkspace.shared.icon(forFile: url.path)
                 let pinyinName = pinyin(name).lowercased()
-                result.append(AppItem(name: name, url: url, icon: icon, pinyinName: pinyinName))
+                let initials = pinyinInitials(name).lowercased()
+                result.append(AppItem(name: name, url: url, icon: icon, pinyinName: pinyinName, pinyinInitials: initials))
             }
         }
 

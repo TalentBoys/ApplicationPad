@@ -34,6 +34,7 @@ struct AppGridView: View {
         return apps.filter {
             $0.name.localizedCaseInsensitiveContains(key)
             || $0.pinyinName.contains(key)
+            || $0.pinyinInitials.contains(key)
         }
     }
 
