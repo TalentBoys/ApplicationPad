@@ -8,33 +8,25 @@
 import SwiftUI
 
 struct AppGridView: View {
-    let showSettingsHint: Bool
-    let isLauncher: Bool
-
     @State private var searchText = ""
     @State private var apps = AppScanner.scan()
     @State private var keyMonitor = KeyEventMonitor()
     @FocusState private var isSearchFocused: Bool
 
-    init(showSettingsHint: Bool, isLauncher: Bool = false) {
-        self.showSettingsHint = showSettingsHint
-        self.isLauncher = isLauncher
-    }
-
     var columns: [GridItem] {
-        let count = isLauncher ? LauncherSettings.columnsCount : 6
+        let count = LauncherSettings.columnsCount
         return Array(repeating: GridItem(.flexible(), spacing: 20), count: count)
     }
 
     var iconSize: CGFloat {
-        isLauncher ? LauncherSettings.iconSize : 64
+        LauncherSettings.iconSize
     }
 
     var recentApps: [AppItem] {
         let key = searchText.lowercased()
         let recent = apps.filter { $0.lastUsed != .distantPast }
             .sorted { $0.lastUsed > $1.lastUsed }
-            .prefix(isLauncher ? LauncherSettings.columnsCount : 6)
+            .prefix(LauncherSettings.columnsCount)
 
         if key.isEmpty {
             return Array(recent)
@@ -76,10 +68,6 @@ struct AppGridView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if showSettingsHint {
-                PermissionHintView()
-            }
-
             // Search box
             TextField("Search applications", text: $searchText)
                 .textFieldStyle(.roundedBorder)
@@ -99,7 +87,7 @@ struct AppGridView: View {
 
                             LazyVGrid(columns: columns, spacing: 20) {
                                 ForEach(recentApps) { app in
-                                    AppItemView(app: app, iconSize: iconSize, isLauncher: isLauncher) {
+                                    AppItemView(app: app, iconSize: iconSize) {
                                         apps = AppScanner.scan()
                                     }
                                 }
@@ -121,7 +109,7 @@ struct AppGridView: View {
 
                         LazyVGrid(columns: columns, spacing: 20) {
                             ForEach(otherApps) { app in
-                                AppItemView(app: app, iconSize: iconSize, isLauncher: isLauncher) {
+                                AppItemView(app: app, iconSize: iconSize) {
                                     apps = AppScanner.scan()
                                 }
                             }
@@ -133,17 +121,23 @@ struct AppGridView: View {
             }
         }
         .onAppear {
-            isSearchFocused = true
-
-            if isLauncher {
-                keyMonitor.startEscListener {
-                    closeLauncher()
-                }
+            focusSearchField()
+            keyMonitor.startEscListener {
+                closeLauncher()
             }
         }
         .onDisappear {
             keyMonitor.stop()
             searchText = ""
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+            focusSearchField()
+        }
+    }
+
+    private func focusSearchField() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            isSearchFocused = true
         }
     }
 
@@ -156,7 +150,6 @@ struct AppGridView: View {
 struct AppItemView: View {
     let app: AppItem
     let iconSize: CGFloat
-    let isLauncher: Bool
     var onLaunch: () -> Void = {}
 
     @State private var isHovered = false
@@ -183,10 +176,7 @@ struct AppItemView: View {
             app.markUsed()
             NSWorkspace.shared.open(app.url)
             onLaunch()
-
-            if isLauncher {
-                LauncherPanel.shared.close()
-            }
+            LauncherPanel.shared.close()
         }
     }
 }

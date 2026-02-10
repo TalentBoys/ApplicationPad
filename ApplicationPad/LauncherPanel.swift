@@ -57,8 +57,8 @@ class LauncherPanel: NSPanel {
 
     func show() {
         updateSize()
-        makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        makeKeyAndOrderFront(nil)
     }
 
     override func resignKey() {
@@ -75,7 +75,7 @@ class LauncherPanel: NSPanel {
 
 struct LauncherContentView: View {
     var body: some View {
-        AppGridView(showSettingsHint: false, isLauncher: true)
+        AppGridView()
             .frame(
                 width: LauncherSettings.windowWidth,
                 height: LauncherSettings.windowHeight
