@@ -21,10 +21,46 @@ struct AppGridView: View {
         self.isLauncher = isLauncher
     }
 
-    let columns = Array(
-        repeating: GridItem(.flexible(), spacing: 20),
-        count: 6
-    )
+    var columns: [GridItem] {
+        let count = isLauncher ? LauncherSettings.columnsCount : 6
+        return Array(repeating: GridItem(.flexible(), spacing: 20), count: count)
+    }
+
+    var iconSize: CGFloat {
+        isLauncher ? LauncherSettings.iconSize : 64
+    }
+
+    var recentApps: [AppItem] {
+        let key = searchText.lowercased()
+        let recent = apps.filter { $0.lastUsed != .distantPast }
+            .sorted { $0.lastUsed > $1.lastUsed }
+            .prefix(isLauncher ? LauncherSettings.columnsCount : 6)
+
+        if key.isEmpty {
+            return Array(recent)
+        }
+        return recent.filter {
+            $0.name.localizedCaseInsensitiveContains(key)
+            || $0.pinyinName.contains(key)
+            || $0.pinyinInitials.contains(key)
+        }
+    }
+
+    var otherApps: [AppItem] {
+        let key = searchText.lowercased()
+        let recentIDs = Set(recentApps.map { $0.id })
+        let others = apps.filter { !recentIDs.contains($0.id) }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+
+        if key.isEmpty {
+            return others
+        }
+        return others.filter {
+            $0.name.localizedCaseInsensitiveContains(key)
+            || $0.pinyinName.contains(key)
+            || $0.pinyinInitials.contains(key)
+        }
+    }
 
     var filteredApps: [AppItem] {
         let key = searchText.lowercased()
@@ -52,11 +88,43 @@ struct AppGridView: View {
                 .focused($isSearchFocused)
 
             ScrollView {
-                LazyVGrid(columns: columns, spacing: 20) {
-                    ForEach(filteredApps) { app in
-                        AppItemView(app: app, isLauncher: isLauncher) {
-                            // Refresh apps list after launch
-                            apps = AppScanner.scan()
+                VStack(spacing: 16) {
+                    // Recent apps section
+                    if !recentApps.isEmpty {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Recent")
+                                .font(.headline)
+                                .foregroundColor(.secondary)
+                                .padding(.horizontal, 4)
+
+                            LazyVGrid(columns: columns, spacing: 20) {
+                                ForEach(recentApps) { app in
+                                    AppItemView(app: app, iconSize: iconSize, isLauncher: isLauncher) {
+                                        apps = AppScanner.scan()
+                                    }
+                                }
+                            }
+                        }
+
+                        Divider()
+                            .padding(.vertical, 8)
+                    }
+
+                    // All other apps
+                    VStack(alignment: .leading, spacing: 12) {
+                        if !recentApps.isEmpty {
+                            Text("All Apps")
+                                .font(.headline)
+                                .foregroundColor(.secondary)
+                                .padding(.horizontal, 4)
+                        }
+
+                        LazyVGrid(columns: columns, spacing: 20) {
+                            ForEach(otherApps) { app in
+                                AppItemView(app: app, iconSize: iconSize, isLauncher: isLauncher) {
+                                    apps = AppScanner.scan()
+                                }
+                            }
                         }
                     }
                 }
@@ -65,10 +133,8 @@ struct AppGridView: View {
             }
         }
         .onAppear {
-            // Auto focus search box
             isSearchFocused = true
 
-            // Esc to close (only for launcher)
             if isLauncher {
                 keyMonitor.startEscListener {
                     closeLauncher()
@@ -89,6 +155,7 @@ struct AppGridView: View {
 
 struct AppItemView: View {
     let app: AppItem
+    let iconSize: CGFloat
     let isLauncher: Bool
     var onLaunch: () -> Void = {}
 
@@ -98,12 +165,12 @@ struct AppItemView: View {
         VStack {
             Image(nsImage: app.icon)
                 .resizable()
-                .frame(width: 64, height: 64)
+                .frame(width: iconSize, height: iconSize)
                 .scaleEffect(isHovered ? 1.1 : 1.0)
                 .animation(.easeOut(duration: 0.15), value: isHovered)
 
             Text(app.name)
-                .font(.caption)
+                .font(iconSize > 64 ? .callout : .caption)
                 .lineLimit(1)
         }
         .padding(8)
@@ -117,7 +184,6 @@ struct AppItemView: View {
             NSWorkspace.shared.open(app.url)
             onLaunch()
 
-            // Close launcher after opening app
             if isLauncher {
                 LauncherPanel.shared.close()
             }

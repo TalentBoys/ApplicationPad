@@ -12,8 +12,11 @@ class LauncherPanel: NSPanel {
     static let shared = LauncherPanel()
 
     private init() {
+        let width = LauncherSettings.windowWidth
+        let height = LauncherSettings.windowHeight
+
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 700, height: 500),
+            contentRect: NSRect(x: 0, y: 0, width: width, height: height),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -27,10 +30,21 @@ class LauncherPanel: NSPanel {
         self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         self.hidesOnDeactivate = true
 
-        let hostingView = NSHostingView(rootView: LauncherContentView(panel: self))
-        self.contentView = hostingView
-
+        updateContent()
         center()
+    }
+
+    func updateSize() {
+        let width = LauncherSettings.windowWidth
+        let height = LauncherSettings.windowHeight
+        setContentSize(NSSize(width: width, height: height))
+        updateContent()
+        center()
+    }
+
+    private func updateContent() {
+        let hostingView = NSHostingView(rootView: LauncherContentView())
+        self.contentView = hostingView
     }
 
     func toggle() {
@@ -42,7 +56,7 @@ class LauncherPanel: NSPanel {
     }
 
     func show() {
-        center()
+        updateSize()
         makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -60,11 +74,12 @@ class LauncherPanel: NSPanel {
 }
 
 struct LauncherContentView: View {
-    let panel: LauncherPanel
-
     var body: some View {
         AppGridView(showSettingsHint: false, isLauncher: true)
-            .frame(width: 700, height: 500)
+            .frame(
+                width: LauncherSettings.windowWidth,
+                height: LauncherSettings.windowHeight
+            )
             .background(VisualEffectView())
             .clipShape(RoundedRectangle(cornerRadius: 12))
     }

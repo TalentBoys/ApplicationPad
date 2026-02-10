@@ -11,10 +11,13 @@ import Carbon
 struct SettingsView: View {
     @AppStorage("hotkeyModifiers") private var hotkeyModifiers: Int = cmdKey | shiftKey
     @AppStorage("hotkeyKeyCode") private var hotkeyKeyCode: Int = kVK_Space
+    @AppStorage("launcherWidth") private var launcherWidth: Double = 1400
+    @AppStorage("launcherHeight") private var launcherHeight: Double = 900
+    @AppStorage("iconSize") private var iconSize: Double = 96
+    @AppStorage("columnsCount") private var columnsCount: Int = 6
 
     @State private var isRecordingHotkey = false
     @State private var hasPermission = AccessibilityManager.isGranted()
-    @State private var keyMonitor: Any?
 
     var body: some View {
         Form {
@@ -59,7 +62,6 @@ struct SettingsView: View {
                         modifiers: $hotkeyModifiers,
                         keyCode: $hotkeyKeyCode
                     ) {
-                        // Re-register hotkey when changed
                         HotKeyManager.shared.unregister()
                         HotKeyManager.shared.register(
                             keyCode: hotkeyKeyCode,
@@ -87,17 +89,69 @@ struct SettingsView: View {
             }
 
             Section {
-                LabeledContent("Version", value: "1.0.0")
+                HStack {
+                    Text("Window Width")
+                    Slider(value: $launcherWidth, in: 600...2000, step: 50)
+                    Text("\(Int(launcherWidth))")
+                        .frame(width: 50)
+                }
+
+                HStack {
+                    Text("Window Height")
+                    Slider(value: $launcherHeight, in: 400...1400, step: 50)
+                    Text("\(Int(launcherHeight))")
+                        .frame(width: 50)
+                }
+
+                HStack {
+                    Text("Icon Size")
+                    Slider(value: $iconSize, in: 48...160, step: 8)
+                    Text("\(Int(iconSize))")
+                        .frame(width: 50)
+                }
+
+                HStack {
+                    Text("Columns")
+                    Spacer()
+                    Picker("", selection: $columnsCount) {
+                        ForEach(4...10, id: \.self) { count in
+                            Text("\(count)").tag(count)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 280)
+                }
+
+                Button("Reset to Default") {
+                    launcherWidth = 1400
+                    launcherHeight = 900
+                    iconSize = 96
+                    columnsCount = 6
+                    LauncherPanel.shared.updateSize()
+                }
+                .font(.caption)
+            } header: {
+                Text("Appearance")
+            } footer: {
+                Text("Changes apply next time you open the launcher")
+                    .foregroundColor(.secondary)
+            }
+
+            Section {
+                LabeledContent("Version", value: Bundle.main.appVersion)
+                LabeledContent("Build", value: Bundle.main.buildNumber)
                 LabeledContent("Author", value: "Kris Jin")
             } header: {
                 Text("About")
             }
         }
         .formStyle(.grouped)
-        .frame(width: 550, height: 400)
+        .frame(width: 550, height: 550)
         .onAppear {
             hasPermission = AccessibilityManager.isGranted()
         }
+        .onChange(of: launcherWidth) { _, _ in LauncherPanel.shared.updateSize() }
+        .onChange(of: launcherHeight) { _, _ in LauncherPanel.shared.updateSize() }
     }
 }
 
@@ -142,15 +196,13 @@ struct HotkeyRecorderView: View {
         isRecording = true
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             let newModifiers = carbonModifiers(from: event.modifierFlags)
-
-            // Require at least one modifier
             if newModifiers != 0 {
                 self.modifiers = newModifiers
                 self.keyCode = Int(event.keyCode)
                 self.stopRecording()
                 self.onChanged()
             }
-            return nil // Consume the event
+            return nil
         }
     }
 
@@ -182,42 +234,24 @@ struct HotkeyRecorderView: View {
         case kVK_DownArrow: return "↓"
         case kVK_LeftArrow: return "←"
         case kVK_RightArrow: return "→"
-        case kVK_ANSI_A: return "A"
-        case kVK_ANSI_B: return "B"
-        case kVK_ANSI_C: return "C"
-        case kVK_ANSI_D: return "D"
-        case kVK_ANSI_E: return "E"
-        case kVK_ANSI_F: return "F"
-        case kVK_ANSI_G: return "G"
-        case kVK_ANSI_H: return "H"
-        case kVK_ANSI_I: return "I"
-        case kVK_ANSI_J: return "J"
-        case kVK_ANSI_K: return "K"
-        case kVK_ANSI_L: return "L"
-        case kVK_ANSI_M: return "M"
-        case kVK_ANSI_N: return "N"
-        case kVK_ANSI_O: return "O"
-        case kVK_ANSI_P: return "P"
-        case kVK_ANSI_Q: return "Q"
-        case kVK_ANSI_R: return "R"
-        case kVK_ANSI_S: return "S"
-        case kVK_ANSI_T: return "T"
-        case kVK_ANSI_U: return "U"
-        case kVK_ANSI_V: return "V"
-        case kVK_ANSI_W: return "W"
-        case kVK_ANSI_X: return "X"
-        case kVK_ANSI_Y: return "Y"
-        case kVK_ANSI_Z: return "Z"
-        case kVK_ANSI_0: return "0"
-        case kVK_ANSI_1: return "1"
-        case kVK_ANSI_2: return "2"
-        case kVK_ANSI_3: return "3"
-        case kVK_ANSI_4: return "4"
-        case kVK_ANSI_5: return "5"
-        case kVK_ANSI_6: return "6"
-        case kVK_ANSI_7: return "7"
-        case kVK_ANSI_8: return "8"
-        case kVK_ANSI_9: return "9"
+        case kVK_ANSI_A...kVK_ANSI_Z:
+            let letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            let index = [kVK_ANSI_A, kVK_ANSI_S, kVK_ANSI_D, kVK_ANSI_F, kVK_ANSI_H,
+                        kVK_ANSI_G, kVK_ANSI_Z, kVK_ANSI_X, kVK_ANSI_C, kVK_ANSI_V,
+                        0, kVK_ANSI_B, kVK_ANSI_Q, kVK_ANSI_W, kVK_ANSI_E, kVK_ANSI_R,
+                        kVK_ANSI_Y, kVK_ANSI_T, kVK_ANSI_1, kVK_ANSI_2, kVK_ANSI_3,
+                        kVK_ANSI_4, kVK_ANSI_6, kVK_ANSI_5, kVK_ANSI_Equal, kVK_ANSI_9,
+                        kVK_ANSI_7, kVK_ANSI_Minus, kVK_ANSI_8, kVK_ANSI_0, kVK_ANSI_RightBracket,
+                        kVK_ANSI_O, kVK_ANSI_U, kVK_ANSI_LeftBracket, kVK_ANSI_I, kVK_ANSI_P,
+                        0, kVK_ANSI_L, kVK_ANSI_J, kVK_ANSI_Quote, kVK_ANSI_K, kVK_ANSI_Semicolon,
+                        kVK_ANSI_Backslash, kVK_ANSI_Comma, kVK_ANSI_Slash, kVK_ANSI_N, kVK_ANSI_M]
+                .firstIndex(of: code)
+            if let idx = index, idx < letters.count {
+                return String(letters[letters.index(letters.startIndex, offsetBy: idx)])
+            }
+            return "?"
+        case kVK_ANSI_0...kVK_ANSI_9:
+            return "\(code - kVK_ANSI_0)"
         default: return "?"
         }
     }
@@ -225,4 +259,14 @@ struct HotkeyRecorderView: View {
 
 #Preview {
     SettingsView()
+}
+
+extension Bundle {
+    var appVersion: String {
+        infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
+    }
+
+    var buildNumber: String {
+        infoDictionary?["CFBundleVersion"] as? String ?? "1"
+    }
 }
