@@ -71,25 +71,19 @@ struct AppGridView: View {
             // Esc to close (only for launcher)
             if isLauncher {
                 keyMonitor.startEscListener {
-                    NSApp.keyWindow?.orderOut(nil)
+                    closeLauncher()
                 }
             }
         }
         .onDisappear {
             keyMonitor.stop()
+            searchText = ""
         }
-        .onReceive(
-            NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)
-        ) { notification in
-            // Auto hide when losing focus (only for launcher)
-            if isLauncher {
-                if let window = notification.object as? NSWindow,
-                   window.title == "Launcher" {
-                    window.orderOut(nil)
-                    searchText = "" // Clear search on close
-                }
-            }
-        }
+    }
+
+    private func closeLauncher() {
+        LauncherPanel.shared.close()
+        searchText = ""
     }
 }
 
@@ -125,7 +119,7 @@ struct AppItemView: View {
 
             // Close launcher after opening app
             if isLauncher {
-                NSApp.keyWindow?.orderOut(nil)
+                LauncherPanel.shared.close()
             }
         }
     }

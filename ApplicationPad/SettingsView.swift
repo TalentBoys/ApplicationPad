@@ -65,7 +65,7 @@ struct SettingsView: View {
                             keyCode: hotkeyKeyCode,
                             modifiers: hotkeyModifiers
                         ) {
-                            AppState.shared.openWindow(.launcher)
+                            LauncherPanel.shared.toggle()
                         }
                     }
                 }
@@ -78,7 +78,7 @@ struct SettingsView: View {
                         keyCode: hotkeyKeyCode,
                         modifiers: hotkeyModifiers
                     ) {
-                        AppState.shared.openWindow(.launcher)
+                        LauncherPanel.shared.toggle()
                     }
                 }
                 .font(.caption)
