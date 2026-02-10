@@ -20,7 +20,7 @@ struct PermissionHintView: View {
                     .foregroundColor(hasPermission ? .green : .blue)
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Quick Launch: ⌘ + ⌥ + Space")
+                    Text("Quick Launch: ⌘ + ⇧ + Space")
                         .font(.headline)
 
                     if hasPermission {

@@ -32,7 +32,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         AccessibilityManager.requestPermission()
 
         // Load saved hotkey settings
-        let modifiers = UserDefaults.standard.object(forKey: "hotkeyModifiers") as? Int ?? (cmdKey | optionKey)
+        let modifiers = UserDefaults.standard.object(forKey: "hotkeyModifiers") as? Int ?? (cmdKey | shiftKey)
         let keyCode = UserDefaults.standard.object(forKey: "hotkeyKeyCode") as? Int ?? kVK_Space
 
         // Register global hotkey

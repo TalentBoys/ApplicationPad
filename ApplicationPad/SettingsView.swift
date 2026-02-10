@@ -9,7 +9,7 @@ import SwiftUI
 import Carbon
 
 struct SettingsView: View {
-    @AppStorage("hotkeyModifiers") private var hotkeyModifiers: Int = cmdKey | optionKey
+    @AppStorage("hotkeyModifiers") private var hotkeyModifiers: Int = cmdKey | shiftKey
     @AppStorage("hotkeyKeyCode") private var hotkeyKeyCode: Int = kVK_Space
 
     @State private var isRecordingHotkey = false
@@ -70,8 +70,8 @@ struct SettingsView: View {
                     }
                 }
 
-                Button("Reset to Default (⌘ + ⌥ + Space)") {
-                    hotkeyModifiers = cmdKey | optionKey
+                Button("Reset to Default (⌘ + ⇧ + Space)") {
+                    hotkeyModifiers = cmdKey | shiftKey
                     hotkeyKeyCode = kVK_Space
                     HotKeyManager.shared.unregister()
                     HotKeyManager.shared.register(

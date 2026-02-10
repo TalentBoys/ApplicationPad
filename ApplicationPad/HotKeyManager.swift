@@ -16,7 +16,7 @@ final class HotKeyManager {
 
     func register(
         keyCode: Int = kVK_Space,
-        modifiers: Int = cmdKey | optionKey,
+        modifiers: Int = cmdKey | shiftKey,
         onTrigger: @escaping () -> Void
     ) {
         // Unregister existing hotkey first
