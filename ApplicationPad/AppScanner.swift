@@ -13,6 +13,15 @@ struct AppItem: Identifiable {
     let name: String
     let url: URL
     let icon: NSImage
+    let pinyinName: String
+
+    var lastUsed: Date {
+        UserDefaults.standard.object(forKey: url.path) as? Date ?? .distantPast
+    }
+
+    func markUsed() {
+        UserDefaults.standard.set(Date(), forKey: url.path)
+    }
 }
 
 final class AppScanner {
@@ -37,9 +46,17 @@ final class AppScanner {
             for url in urls where url.pathExtension == "app" {
                 let name = url.deletingPathExtension().lastPathComponent
                 let icon = NSWorkspace.shared.icon(forFile: url.path)
-                result.append(AppItem(name: name, url: url, icon: icon))
+                let pinyinName = pinyin(name).lowercased()
+                result.append(AppItem(name: name, url: url, icon: icon, pinyinName: pinyinName))
             }
         }
-        return result.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+
+        // Sort by recent use, then by name
+        return result.sorted {
+            if $0.lastUsed != $1.lastUsed {
+                return $0.lastUsed > $1.lastUsed
+            }
+            return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
     }
 }

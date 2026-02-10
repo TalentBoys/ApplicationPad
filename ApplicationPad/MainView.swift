@@ -9,7 +9,7 @@ import SwiftUI
 
 struct MainView: View {
     var body: some View {
-        AppGridView(showSettingsHint: true)
+        AppGridView(showSettingsHint: true, isLauncher: false)
             .frame(minWidth: 900, minHeight: 600)
             .background(VisualEffectView())
     }

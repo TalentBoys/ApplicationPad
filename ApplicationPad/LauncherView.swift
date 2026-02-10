@@ -12,7 +12,7 @@ struct LauncherView: View {
         ZStack {
             VisualEffectView()
 
-            AppGridView(showSettingsHint: false)
+            AppGridView(showSettingsHint: false, isLauncher: true)
         }
         .frame(width: 700, height: 500)
     }
