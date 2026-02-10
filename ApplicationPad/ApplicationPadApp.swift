@@ -13,5 +13,6 @@ struct ApplicationPadApp: App {
         WindowGroup {
             ContentView()
         }
+        .windowResizability(.contentSize)
     }
 }
