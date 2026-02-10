@@ -128,7 +128,7 @@ struct ApplicationPadApp: App {
         .windowResizability(.contentSize)
 
         // Menu Bar
-        MenuBarExtra("ApplicationPad", systemImage: "square.grid.3x3") {
+        MenuBarExtra("ApplicationPad", image: "MenuBarIcon") {
             MenuBarCommands()
         }
     }
