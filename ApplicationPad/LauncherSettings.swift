@@ -48,6 +48,11 @@ struct LauncherSettings {
         set { UserDefaults.standard.set(Double(newValue), forKey: "scrollSensitivity") }
     }
 
+    static var lastPage: Int {
+        get { UserDefaults.standard.integer(forKey: "lastPage") }
+        set { UserDefaults.standard.set(newValue, forKey: "lastPage") }
+    }
+
     static var appsPerPage: Int {
         columnsCount * rowsCount
     }
@@ -155,6 +160,14 @@ struct LauncherSettings {
         // No saved items, return apps sorted alphabetically
         let sortedApps = apps.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         return sortedApps.map { .app($0) }
+    }
+
+    // Reset grid layout to default (clear all custom order and folders)
+    static func resetGridLayout() {
+        UserDefaults.standard.removeObject(forKey: gridItemsKey)
+        UserDefaults.standard.removeObject(forKey: "customAppOrder")
+        FolderIconCache.shared.clearCache()
+        IconCache.shared.clearCache()
     }
 
     // Legacy support - keep old methods for compatibility

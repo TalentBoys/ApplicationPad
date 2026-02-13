@@ -211,6 +211,18 @@ class DragStateMachine: ObservableObject {
         case .mergeReady(let targetId):
             print("   ✅ State is mergeReady, will merge with \(targetId.uuidString.prefix(8))")
             result = (true, targetId)
+        case .mergeHovering(let targetId, let startTime):
+            // Check if user has been hovering long enough (at least half the required time)
+            // This allows merge even if user releases slightly before timer fires
+            let elapsedTime = Date().timeIntervalSince(startTime)
+            let minimumHoverTime = mergeHoverDuration * 0.5  // 50% of required time
+            if elapsedTime >= minimumHoverTime {
+                print("   ✅ State is mergeHovering but elapsed time \(String(format: "%.2f", elapsedTime))s >= \(String(format: "%.2f", minimumHoverTime))s, will merge with \(targetId.uuidString.prefix(8))")
+                result = (true, targetId)
+            } else {
+                print("   ❌ State is mergeHovering but elapsed time \(String(format: "%.2f", elapsedTime))s < \(String(format: "%.2f", minimumHoverTime))s, not long enough")
+                result = (false, nil)
+            }
         default:
             print("   ❌ State is NOT mergeReady")
             result = (false, nil)

@@ -86,7 +86,7 @@ struct FolderItem: Identifiable, Equatable, Codable {
 
     // Cache key for folder icon
     private var iconCacheKey: String {
-        apps.prefix(4).map { $0.url.path }.joined(separator: "|")
+        apps.prefix(9).map { $0.url.path }.joined(separator: "|")
     }
 
     var icon: NSImage {
@@ -96,30 +96,35 @@ struct FolderItem: Identifiable, Equatable, Codable {
             return cached
         }
 
-        // Generate a folder icon from first 4 apps
+        // Generate a folder icon from first 9 apps (3x3 grid)
         let size: CGFloat = 128
         let image = NSImage(size: NSSize(width: size, height: size))
         image.lockFocus()
 
-        // Draw folder background
+        // Draw folder background with border for better visibility
         let folderColor = NSColor.systemGray.withAlphaComponent(0.3)
-        let folderRect = NSRect(x: 0, y: 0, width: size, height: size)
+        let borderColor = NSColor.white.withAlphaComponent(0.3)
+        let folderRect = NSRect(x: 2, y: 2, width: size - 4, height: size - 4)
         let folderPath = NSBezierPath(roundedRect: folderRect, xRadius: 20, yRadius: 20)
         folderColor.setFill()
         folderPath.fill()
 
-        // Draw app icons in a 2x2 grid
-        let miniSize: CGFloat = 40
-        let padding: CGFloat = 12
-        let positions = [
-            CGPoint(x: padding, y: size - padding - miniSize),
-            CGPoint(x: size - padding - miniSize, y: size - padding - miniSize),
-            CGPoint(x: padding, y: padding),
-            CGPoint(x: size - padding - miniSize, y: padding)
-        ]
+        // Draw border
+        borderColor.setStroke()
+        folderPath.lineWidth = 2
+        folderPath.stroke()
 
-        for (index, app) in apps.prefix(4).enumerated() {
-            let rect = NSRect(x: positions[index].x, y: positions[index].y, width: miniSize, height: miniSize)
+        // Draw app icons in a 3x3 grid
+        let miniSize: CGFloat = 30
+        let padding: CGFloat = 12
+        let spacing: CGFloat = (size - padding * 2 - miniSize * 3) / 2
+
+        for (index, app) in apps.prefix(9).enumerated() {
+            let row = index / 3
+            let col = index % 3
+            let x = padding + CGFloat(col) * (miniSize + spacing)
+            let y = size - padding - miniSize - CGFloat(row) * (miniSize + spacing)
+            let rect = NSRect(x: x, y: y, width: miniSize, height: miniSize)
             app.icon.draw(in: rect)
         }
 

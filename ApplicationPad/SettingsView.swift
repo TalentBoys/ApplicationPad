@@ -21,6 +21,7 @@ struct SettingsView: View {
     @AppStorage("scrollSensitivity") private var scrollSensitivity: Double = 1.0
 
     @State private var isRecordingHotkey = false
+    @State private var showingResetAlert = false
 
     var body: some View {
         Form {
@@ -138,6 +139,19 @@ struct SettingsView: View {
             }
 
             Section {
+                Button("Reset App Layout") {
+                    showingResetAlert = true
+                }
+                .foregroundColor(.red)
+            } header: {
+                Text("Layout")
+            } footer: {
+                Text("This will remove all folders and reset app positions to default alphabetical order.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            Section {
                 LabeledContent("Version", value: Bundle.main.appVersion)
                 LabeledContent("Build", value: Bundle.main.buildNumber)
                 LabeledContent("Author", value: "Kris Jin")
@@ -146,7 +160,15 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 550, height: 580)
+        .frame(width: 550, height: 650)
+        .alert("Reset App Layout", isPresented: $showingResetAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Reset", role: .destructive) {
+                LauncherSettings.resetGridLayout()
+            }
+        } message: {
+            Text("This will remove all folders and reset app positions to default alphabetical order. This action cannot be undone.")
+        }
     }
 }
 

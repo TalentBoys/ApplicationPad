@@ -12,7 +12,7 @@ struct AppGridView: View {
     @State private var apps = AppScanner.scan()
     @State private var gridItems: [LauncherItem] = []  // Display order, updated during drag
     @State private var keyMonitor = KeyEventMonitor()
-    @State private var currentPage = 0
+    @State private var currentPage = LauncherSettings.lastPage
     @State private var dragOffset: CGFloat = 0
     @State private var scrollMonitor: Any?
     @State private var pageWidth: CGFloat = 0
@@ -28,6 +28,8 @@ struct AppGridView: View {
     @State private var dragMouseOffset: CGSize = .zero  // Mouse click position relative to icon center
     @State private var isDraggingPage: Bool = false
     @State private var dragTargetIndex: Int?  // Visual target position during drag (no backfill)
+    @State private var dragEdgePageChanged: Bool = false  // Prevent multiple page changes during edge drag
+    @State private var dragEdgeStartTime: Date? = nil  // Track when edge was first touched for auto-repeat
 
     // State machine for drag behavior
     @StateObject private var dragStateMachine = DragStateMachine()
@@ -112,9 +114,7 @@ struct AppGridView: View {
                 } else if fromIndex < toIndex {
                     // Dragging right: positions between from+1..to shift left by 1
                     if globalVisualPos > fromIndex && globalVisualPos <= toIndex {
-                        sourceIndex = globalVisualPos  // shifted: visual pos N shows item N+1-1 = N... wait
-                    } else if globalVisualPos == fromIndex {
-                        continue  // original position is now empty (dragging item moved)
+                        sourceIndex = globalVisualPos
                     } else {
                         sourceIndex = globalVisualPos
                     }
@@ -122,8 +122,6 @@ struct AppGridView: View {
                     // Dragging left: positions between to..from-1 shift right by 1
                     if globalVisualPos >= toIndex && globalVisualPos < fromIndex {
                         sourceIndex = globalVisualPos + 1
-                    } else if globalVisualPos == fromIndex {
-                        continue  // original position is now empty
                     } else {
                         sourceIndex = globalVisualPos
                     }
@@ -222,8 +220,8 @@ struct AppGridView: View {
                                                     refreshGridItems()
                                                 }
                                             )
-                                            // Scale effect: folder targets scale up when merge hovering/ready, app targets scale down when hovering
-                                            .scaleEffect(isDragging ? 1.1 : (isMergeReadyTarget ? 1.15 : (isMergeHoveringTarget ? (isTargetFolder ? 1.1 : 0.9) : 1.0)))
+                                            // Scale effect: all merge targets scale up when hovering/ready (folder preview effect)
+                                            .scaleEffect(isDragging ? 1.1 : (isMergeReadyTarget ? 1.15 : (isMergeHoveringTarget ? 1.1 : 1.0)))
                                             .zIndex(isDragging ? 100 : 0)
                                             .opacity(isDragging ? 0.9 : 1.0)
                                             // Only animate position for non-dragging items to avoid flicker
@@ -260,9 +258,14 @@ struct AppGridView: View {
                                                             let dragX = dragStartPosition.x + draggingOffset.width
                                                             let dragY = dragStartPosition.y + draggingOffset.height
 
+                                                            // screenX is the actual mouse position without page compensation
+                                                            // Used for edge detection to prevent page change loops
+                                                            let screenX = dragStartPosition.x + drag.translation.width + dragMouseOffset.width
+
                                                             updateDragPosition(
                                                                 dragX: dragX,
                                                                 dragY: dragY,
+                                                                screenX: screenX,
                                                                 cellWidth: cellWidth,
                                                                 cellHeight: cellHeight
                                                             )
@@ -381,6 +384,10 @@ struct AppGridView: View {
         }
         .onAppear {
             refreshGridItems()
+            // Ensure currentPage is within valid range
+            if currentPage >= totalPages {
+                currentPage = max(0, totalPages - 1)
+            }
             focusSearchField()
             keyMonitor.startEscListener {
                 if openFolder != nil {
@@ -395,7 +402,6 @@ struct AppGridView: View {
         .onDisappear {
             keyMonitor.stop()
             searchText = ""
-            currentPage = 0
             openFolder = nil
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
@@ -435,14 +441,81 @@ struct AppGridView: View {
     }
 
     private func closeLauncher() {
+        LauncherSettings.lastPage = currentPage
         LauncherPanel.shared.close()
         searchText = ""
-        currentPage = 0
         openFolder = nil
     }
 
-    private func updateDragPosition(dragX: CGFloat, dragY: CGFloat, cellWidth: CGFloat, cellHeight: CGFloat) {
-        guard let _ = dragCurrentIndex, let dragging = draggingItem else { return }
+    private func updateDragPosition(dragX: CGFloat, dragY: CGFloat, screenX: CGFloat, cellWidth: CGFloat, cellHeight: CGFloat) {
+        guard let currentIndex = dragCurrentIndex, let dragging = draggingItem else { return }
+
+        // Check for edge drag to change page
+        // Use screenX (actual mouse position) instead of dragX (compensated position)
+        // This prevents page change loops caused by dragAccumulatedOffset compensation
+        let edgeThreshold: CGFloat = 50  // pixels from edge to trigger page change
+        let edgeRepeatDelay: TimeInterval = 2.0  // seconds to wait before allowing another page change
+
+        let isNearLeftEdge = screenX < edgeThreshold && currentPage > 0
+        let isNearRightEdge = screenX > pageWidth - edgeThreshold && currentPage < totalPages - 1
+        let isNearEdge = isNearLeftEdge || isNearRightEdge
+
+        if isNearEdge {
+            let now = Date()
+
+            var shouldChangePage = false
+            var pageDirection: Int = 0  // -1 for left, +1 for right
+
+            if !dragEdgePageChanged {
+                // First touch on edge - trigger page change immediately
+                dragEdgePageChanged = true
+                dragEdgeStartTime = now
+                shouldChangePage = true
+                pageDirection = isNearLeftEdge ? -1 : 1
+            } else if let startTime = dragEdgeStartTime {
+                // Already changed page, check if delay has passed for auto-repeat
+                if now.timeIntervalSince(startTime) >= edgeRepeatDelay {
+                    // Reset for another page change
+                    dragEdgeStartTime = now
+                    shouldChangePage = true
+                    if isNearLeftEdge && currentPage > 0 {
+                        pageDirection = -1
+                    } else if isNearRightEdge && currentPage < totalPages - 1 {
+                        pageDirection = 1
+                    }
+                }
+            }
+
+            if shouldChangePage && pageDirection != 0 {
+                let newPage = currentPage + pageDirection
+
+                // Determine target position on new page
+                let newTargetIndex: Int
+                if pageDirection > 0 {
+                    // Moving to next page - place at beginning of new page
+                    newTargetIndex = newPage * appsPerPage
+                } else {
+                    // Moving to previous page - place at end of previous page
+                    newTargetIndex = min(newPage * appsPerPage + appsPerPage - 1, gridItems.count - 1)
+                }
+
+                // Update dragStartPosition to compensate for page change
+                // This keeps the visual position consistent
+                dragAccumulatedOffset.width -= CGFloat(pageDirection) * pageWidth
+
+                // Only update target index - don't modify gridItems during drag
+                // This prevents SwiftUI from re-rendering and breaking the drag gesture
+                dragTargetIndex = max(0, min(newTargetIndex, gridItems.count - 1))
+
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    currentPage = newPage
+                }
+            }
+        } else {
+            // Not near edge - reset flags to allow next edge trigger
+            dragEdgePageChanged = false
+            dragEdgeStartTime = nil
+        }
 
         // Use state machine for hit detection and state management
         dragStateMachine.updateDrag(
@@ -598,11 +671,18 @@ struct AppGridView: View {
             dragStartPosition = .zero
             dragAccumulatedOffset = .zero
             dragMouseOffset = .zero
+            dragEdgePageChanged = false
+            dragEdgeStartTime = nil
         }
     }
 
     private func startScrollMonitor() {
-        scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
+        scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [self] event in
+            // Skip if folder is open - let folder handle its own scrolling
+            if openFolder != nil {
+                return event
+            }
+
             if event.momentumPhase != [] {
                 return event
             }
@@ -691,9 +771,20 @@ struct GridItemView: View {
                 // Folder preview background (gray folder style for merge)
                 // Only show for app-to-app merge, not for folder targets
                 if (isMergeHovering || isMergeReady) && !isFolder {
-                    // Use gray folder style instead of blue border
+                    // Use gray folder style with border (matching folder merge effect)
                     RoundedRectangle(cornerRadius: iconSize * 0.2)
                         .fill(Color.gray.opacity(0.4))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: iconSize * 0.2)
+                                .stroke(Color.white.opacity(0.6), lineWidth: 2)
+                        )
+                        .frame(width: iconSize * 1.15, height: iconSize * 1.15)
+                }
+
+                // Border effect for folder targets during merge
+                if (isMergeHovering || isMergeReady) && isFolder {
+                    RoundedRectangle(cornerRadius: iconSize * 0.2)
+                        .stroke(Color.white.opacity(0.6), lineWidth: 2)
                         .frame(width: iconSize * 1.15, height: iconSize * 1.15)
                 }
 
@@ -749,6 +840,8 @@ struct FolderOverlayView: View {
     @State private var isEditingName = false
     @State private var currentPage = 0
     @State private var dragOffset: CGFloat = 0
+    @State private var scrollMonitor: Any?
+    @State private var scrollEndTimer: Timer?
 
     // Drag-to-reorder state for folder apps
     @State private var draggingApp: AppItem?
@@ -790,7 +883,7 @@ struct FolderOverlayView: View {
         guard start < folder.apps.count else { return [] }
 
         // During drag: show visual reordering
-        if let _ = draggingApp,
+        if let dragging = draggingApp,
            let fromIndex = dragCurrentIndex,
            let toIndex = dragTargetIndex,
            fromIndex != toIndex {
@@ -802,20 +895,19 @@ struct FolderOverlayView: View {
 
                 let sourceIndex: Int
                 if globalVisualPos == toIndex {
+                    // Target position shows the dragging item
                     sourceIndex = fromIndex
                 } else if fromIndex < toIndex {
+                    // Dragging right: positions between from+1..to shift left by 1
                     if globalVisualPos > fromIndex && globalVisualPos <= toIndex {
                         sourceIndex = globalVisualPos
-                    } else if globalVisualPos == fromIndex {
-                        continue
                     } else {
                         sourceIndex = globalVisualPos
                     }
                 } else {
+                    // Dragging left: positions between to..from-1 shift right by 1
                     if globalVisualPos >= toIndex && globalVisualPos < fromIndex {
                         sourceIndex = globalVisualPos + 1
-                    } else if globalVisualPos == fromIndex {
-                        continue
                     } else {
                         sourceIndex = globalVisualPos
                     }
@@ -1059,6 +1151,73 @@ struct FolderOverlayView: View {
             }
         }
         .transition(.opacity.combined(with: .scale(scale: 0.8)))
+        .onAppear {
+            startFolderScrollMonitor()
+        }
+        .onDisappear {
+            stopFolderScrollMonitor()
+        }
+    }
+
+    private func startFolderScrollMonitor() {
+        scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [self] event in
+            if event.momentumPhase != [] {
+                return event
+            }
+
+            // Only handle if folder has multiple pages
+            guard totalPages > 1 else { return event }
+
+            let invert: CGFloat = LauncherSettings.invertScroll ? -1 : 1
+            let sensitivity = LauncherSettings.scrollSensitivity
+
+            let deltaX = event.scrollingDeltaX * invert * sensitivity
+            let deltaY = event.scrollingDeltaY * invert * sensitivity
+
+            let delta = deltaX - deltaY
+
+            guard abs(delta) > 0.1 else { return event }
+
+            let contentWidth = launcherCellWidth * CGFloat(folderColumns)
+            dragOffset += delta
+
+            let maxOffset = contentWidth > 0 ? contentWidth : 500
+            dragOffset = max(-maxOffset, min(maxOffset, dragOffset))
+
+            if currentPage == 0 && dragOffset > 0 {
+                dragOffset = min(dragOffset, 50)
+            } else if currentPage == totalPages - 1 && dragOffset < 0 {
+                dragOffset = max(dragOffset, -50)
+            }
+
+            scrollEndTimer?.invalidate()
+            scrollEndTimer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: false) { _ in
+                DispatchQueue.main.async {
+                    let threshold = contentWidth * 0.15
+                    let currentDragOffset = dragOffset
+
+                    withAnimation(.easeOut(duration: 0.3)) {
+                        if currentDragOffset < -threshold && currentPage < totalPages - 1 {
+                            currentPage += 1
+                        } else if currentDragOffset > threshold && currentPage > 0 {
+                            currentPage -= 1
+                        }
+                        dragOffset = 0
+                    }
+                }
+            }
+
+            return nil  // Consume the event so it doesn't propagate
+        }
+    }
+
+    private func stopFolderScrollMonitor() {
+        if let monitor = scrollMonitor {
+            NSEvent.removeMonitor(monitor)
+            scrollMonitor = nil
+        }
+        scrollEndTimer?.invalidate()
+        scrollEndTimer = nil
     }
 }
 
