@@ -25,6 +25,7 @@ struct AppGridView: View {
     @State private var dragCurrentIndex: Int?
     @State private var dragStartPosition: CGPoint = .zero
     @State private var dragAccumulatedOffset: CGSize = .zero  // Compensate for dragStartPosition changes
+    @State private var dragMouseOffset: CGSize = .zero  // Mouse click position relative to icon center
     @State private var isDraggingPage: Bool = false
 
     // State machine for drag behavior
@@ -135,8 +136,8 @@ struct AppGridView: View {
                                             let isMergeHoveringTarget = isMergeHovering && isMergeTarget
                                             let isMergeReadyTarget = isMergeReady && isMergeTarget
 
-                                            let displayX = isDragging ? dragStartPosition.x : x
-                                            let displayY = isDragging ? dragStartPosition.y : y
+                                            let displayX = isDragging ? dragStartPosition.x + draggingOffset.width : x
+                                            let displayY = isDragging ? dragStartPosition.y + draggingOffset.height : y
 
                                             GridItemView(
                                                 item: item,
@@ -152,14 +153,13 @@ struct AppGridView: View {
                                                     refreshGridItems()
                                                 }
                                             )
-                                            .position(x: displayX, y: displayY)
-                                            .offset(isDragging ? draggingOffset : .zero)
                                             .scaleEffect(isDragging ? 1.1 : (isMergeReadyTarget ? 1.15 : (isMergeHoveringTarget ? 0.9 : 1.0)))
                                             .zIndex(isDragging ? 100 : 0)
                                             .opacity(isDragging ? 0.9 : 1.0)
                                             .animation(.easeInOut(duration: 0.2), value: globalIndex)
                                             .animation(.spring(response: 0.25, dampingFraction: 0.7), value: isMergeHoveringTarget)
                                             .animation(.spring(response: 0.2, dampingFraction: 0.6), value: isMergeReadyTarget)
+                                            .position(x: displayX, y: displayY)  // position 放最后，避免坐标系偏移
                                             .highPriorityGesture(
                                                 DragGesture(minimumDistance: 15)
                                                     .onChanged { drag in
@@ -168,19 +168,21 @@ struct AppGridView: View {
                                                             dragCurrentIndex = globalIndex
                                                             dragStartPosition = CGPoint(x: x, y: y)
                                                             dragAccumulatedOffset = .zero
+                                                            // Record mouse click position relative to icon center
+                                                            // This ensures the icon stays "attached" to where the user clicked
+                                                            dragMouseOffset = CGSize(
+                                                                width: drag.startLocation.x - x,
+                                                                height: drag.startLocation.y - y
+                                                            )
                                                             dragStateMachine.startDrag()
                                                             setupStateMachineCallbacks(cellWidth: cellWidth, cellHeight: cellHeight)
-                                                            print("=== DRAG START ===")
-                                                            print("item: \(item.name), globalIndex: \(globalIndex)")
-                                                            print("dragStartPosition: \(dragStartPosition)")
-                                                            print("==================")
                                                         }
 
                                                         if draggingItem?.id == item.id {
-                                                            // Apply accumulated offset to compensate for dragStartPosition changes
+                                                            // Apply accumulated offset and mouse offset to keep icon attached to cursor
                                                             draggingOffset = CGSize(
-                                                                width: drag.translation.width + dragAccumulatedOffset.width,
-                                                                height: drag.translation.height + dragAccumulatedOffset.height
+                                                                width: drag.translation.width + dragAccumulatedOffset.width + dragMouseOffset.width,
+                                                                height: drag.translation.height + dragAccumulatedOffset.height + dragMouseOffset.height
                                                             )
 
                                                             let dragX = dragStartPosition.x + draggingOffset.width
@@ -196,10 +198,6 @@ struct AppGridView: View {
                                                     }
                                                     .onEnded { _ in
                                                         if draggingItem?.id == item.id {
-                                                            print("=== DRAG END ===")
-                                                            print("final dragStartPosition: \(dragStartPosition)")
-                                                            print("final draggingOffset: \(draggingOffset)")
-                                                            print("================")
                                                             finishDragging()
                                                         }
                                                     }
@@ -400,18 +398,12 @@ struct AppGridView: View {
                   targetIndex >= 0,
                   targetIndex < gridItems.count else { return }
 
-            print("=== REORDER ===")
-            print("currentIndex: \(currentIndex) -> targetIndex: \(targetIndex)")
-            print("BEFORE: dragStartPosition: \(dragStartPosition)")
-            print("BEFORE: dragAccumulatedOffset: \(dragAccumulatedOffset)")
-
             // Perform reorder
             withAnimation(.easeInOut(duration: 0.2)) {
                 gridItems.remove(at: currentIndex)
                 let newIndex = targetIndex > currentIndex ? targetIndex - 1 : targetIndex
                 gridItems.insert(dragging, at: min(newIndex, gridItems.count))
                 dragCurrentIndex = min(newIndex, gridItems.count - 1)
-                print("newIndex in gridItems: \(dragCurrentIndex!)")
             }
 
             // Calculate new cell position
@@ -433,11 +425,6 @@ struct AppGridView: View {
                 height: dragAccumulatedOffset.height - deltaY
             )
             dragStartPosition = newStartPosition
-
-            print("AFTER: dragStartPosition: \(dragStartPosition)")
-            print("AFTER: dragAccumulatedOffset: \(dragAccumulatedOffset)")
-            print("delta: (\(deltaX), \(deltaY))")
-            print("===============")
         }
 
         dragStateMachine.onMergeReady = { targetId in
@@ -488,6 +475,7 @@ struct AppGridView: View {
         dragCurrentIndex = nil
         dragStartPosition = .zero
         dragAccumulatedOffset = .zero
+        dragMouseOffset = .zero
         dragStateMachine.reset()
 
         // Save
@@ -519,6 +507,7 @@ struct AppGridView: View {
             dragCurrentIndex = nil
             dragStartPosition = .zero
             dragAccumulatedOffset = .zero
+            dragMouseOffset = .zero
         }
     }
 
