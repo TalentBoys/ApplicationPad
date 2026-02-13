@@ -18,6 +18,8 @@ struct AppGridView: View {
     var rowsCount: Int { LauncherSettings.rowsCount }
     var appsPerPage: Int { LauncherSettings.appsPerPage }
     var iconSize: CGFloat { LauncherSettings.iconSize }
+    var horizontalPadding: CGFloat { LauncherSettings.horizontalPadding }
+    var verticalPadding: CGFloat { LauncherSettings.verticalPadding }
 
     var filteredApps: [AppItem] {
         let key = searchText.lowercased()
@@ -52,8 +54,9 @@ struct AppGridView: View {
             let screenHeight = geometry.size.height
             let searchHeight: CGFloat = 60
             let pageIndicatorHeight: CGFloat = totalPages > 1 ? 50 : 0
-            let availableHeight = screenHeight - searchHeight - pageIndicatorHeight
-            let cellWidth = screenWidth / CGFloat(columnsCount)
+            let availableWidth = screenWidth - horizontalPadding * 2
+            let availableHeight = screenHeight - searchHeight - pageIndicatorHeight - verticalPadding * 2
+            let cellWidth = availableWidth / CGFloat(columnsCount)
             let cellHeight = availableHeight / CGFloat(rowsCount)
 
             ZStack {
@@ -85,8 +88,8 @@ struct AppGridView: View {
                                     ForEach(Array(pageApps.enumerated()), id: \.element.id) { index, app in
                                         let row = index / columnsCount
                                         let col = index % columnsCount
-                                        let x = cellWidth * (CGFloat(col) + 0.5)
-                                        let y = cellHeight * (CGFloat(row) + 0.5)
+                                        let x = horizontalPadding + cellWidth * (CGFloat(col) + 0.5)
+                                        let y = verticalPadding + cellHeight * (CGFloat(row) + 0.5)
 
                                         AppItemView(app: app, iconSize: iconSize) {
                                             apps = AppScanner.scan()
@@ -111,7 +114,7 @@ struct AppGridView: View {
                                 }
                         )
                     }
-                    .frame(height: availableHeight)
+                    .frame(height: availableHeight + verticalPadding * 2)
 
                     // Page indicator
                     if totalPages > 1 {

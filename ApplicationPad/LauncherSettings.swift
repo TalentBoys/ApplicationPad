@@ -23,6 +23,16 @@ struct LauncherSettings {
         set { UserDefaults.standard.set(newValue, forKey: "rowsCount") }
     }
 
+    static var horizontalPadding: CGFloat {
+        get { CGFloat(UserDefaults.standard.object(forKey: "horizontalPadding") as? Double ?? 120) }
+        set { UserDefaults.standard.set(Double(newValue), forKey: "horizontalPadding") }
+    }
+
+    static var verticalPadding: CGFloat {
+        get { CGFloat(UserDefaults.standard.object(forKey: "verticalPadding") as? Double ?? 40) }
+        set { UserDefaults.standard.set(Double(newValue), forKey: "verticalPadding") }
+    }
+
     static var appsPerPage: Int {
         columnsCount * rowsCount
     }

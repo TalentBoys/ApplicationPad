@@ -14,6 +14,8 @@ struct SettingsView: View {
     @AppStorage("iconSize") private var iconSize: Double = 96
     @AppStorage("columnsCount") private var columnsCount: Int = 8
     @AppStorage("rowsCount") private var rowsCount: Int = 5
+    @AppStorage("horizontalPadding") private var horizontalPadding: Double = 120
+    @AppStorage("verticalPadding") private var verticalPadding: Double = 40
 
     @State private var isRecordingHotkey = false
 
@@ -87,10 +89,26 @@ struct SettingsView: View {
                     .frame(width: 240)
                 }
 
+                HStack {
+                    Text("Horizontal Padding")
+                    Slider(value: $horizontalPadding, in: 0...200, step: 10)
+                    Text("\(Int(horizontalPadding))")
+                        .frame(width: 50)
+                }
+
+                HStack {
+                    Text("Vertical Padding")
+                    Slider(value: $verticalPadding, in: 0...200, step: 10)
+                    Text("\(Int(verticalPadding))")
+                        .frame(width: 50)
+                }
+
                 Button("Reset to Default") {
                     iconSize = 96
                     columnsCount = 8
                     rowsCount = 5
+                    horizontalPadding = 120
+                    verticalPadding = 40
                 }
                 .font(.caption)
             } header: {
@@ -106,7 +124,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 550, height: 400)
+        .frame(width: 550, height: 480)
     }
 }
 
