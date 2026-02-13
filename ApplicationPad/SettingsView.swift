@@ -17,41 +17,9 @@ struct SettingsView: View {
     @AppStorage("columnsCount") private var columnsCount: Int = 6
 
     @State private var isRecordingHotkey = false
-    @State private var hasPermission = AccessibilityManager.isGranted()
 
     var body: some View {
         Form {
-            Section {
-                HStack {
-                    Text("Permission Status")
-                    Spacer()
-                    if hasPermission {
-                        Label("Granted", systemImage: "checkmark.circle.fill")
-                            .foregroundColor(.green)
-                    } else {
-                        Label("Not Granted", systemImage: "xmark.circle.fill")
-                            .foregroundColor(.red)
-                    }
-                }
-
-                if !hasPermission {
-                    Button("Request Permission") {
-                        AccessibilityManager.requestPermission()
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-                            hasPermission = AccessibilityManager.isGranted()
-                        }
-                    }
-
-                    Button("Open System Settings") {
-                        NSWorkspace.shared.open(
-                            URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
-                        )
-                    }
-                }
-            } header: {
-                Text("Accessibility")
-            }
-
             Section {
                 HStack {
                     Text("Open Launcher")
@@ -147,9 +115,6 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .frame(width: 550, height: 550)
-        .onAppear {
-            hasPermission = AccessibilityManager.isGranted()
-        }
         .onChange(of: launcherWidth) { _, _ in LauncherPanel.shared.updateSize() }
         .onChange(of: launcherHeight) { _, _ in LauncherPanel.shared.updateSize() }
     }
