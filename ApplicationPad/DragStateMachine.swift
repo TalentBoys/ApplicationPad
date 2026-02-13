@@ -85,7 +85,7 @@ enum DragEvent {
 
 enum HitZone: Equatable {
     case none
-    case mergeZone(targetId: UUID, targetIndex: Int)
+    case mergeZone(targetId: UUID, targetIndex: Int, isFolder: Bool)
     case reorderZone(targetIndex: Int)
 }
 
@@ -205,10 +205,14 @@ class DragStateMachine: ObservableObject {
     func endDrag() -> (shouldMerge: Bool, targetId: UUID?) {
         let result: (shouldMerge: Bool, targetId: UUID?)
 
+        print("🛑 endDrag called, current state=\(internalState)")
+
         switch internalState {
         case .mergeReady(let targetId):
+            print("   ✅ State is mergeReady, will merge with \(targetId.uuidString.prefix(8))")
             result = (true, targetId)
         default:
+            print("   ❌ State is NOT mergeReady")
             result = (false, nil)
         }
 
@@ -288,7 +292,14 @@ class DragStateMachine: ObservableObject {
         let mergeRadius = iconSize * mergeZoneRatio / 2
 
         if distanceFromCenter <= mergeRadius {
-            return .mergeZone(targetId: targetItem.id, targetIndex: targetIndex)
+            // Check if target is a folder
+            let isFolder: Bool
+            if case .folder = targetItem {
+                isFolder = true
+            } else {
+                isFolder = false
+            }
+            return .mergeZone(targetId: targetItem.id, targetIndex: targetIndex, isFolder: isFolder)
         }
 
         // For reorder: check if drag position has crossed the target's center
@@ -330,12 +341,15 @@ class DragStateMachine: ObservableObject {
     // MARK: - Process Hit Zone
 
     private func processHitZone(_ hitZone: HitZone) {
+        print("🎯 processHitZone: \(hitZone), velocity=\(String(format: "%.1f", currentVelocity)), state=\(state)")
+
         // High velocity always triggers reorder
         if currentVelocity > velocityThreshold {
+            print("   ⚡ High velocity detected, forcing reorder")
             transition(with: .highVelocityDetected)
 
             switch hitZone {
-            case .mergeZone(_, let index), .reorderZone(let index):
+            case .mergeZone(_, let index, _), .reorderZone(let index):
                 transition(with: .enterReorderZone(targetIndex: index))
             case .none:
                 transition(with: .leaveTarget)
@@ -347,12 +361,32 @@ class DragStateMachine: ObservableObject {
         case .none:
             transition(with: .leaveTarget)
 
-        case .mergeZone(let targetId, _):
+        case .mergeZone(let targetId, _, let isFolder):
+            print("   📍 In merge zone for target \(targetId.uuidString.prefix(8)), isFolder=\(isFolder)")
+
+            // If target is a folder, immediately go to mergeReady (no hover delay needed)
+            if isFolder {
+                print("   📁 Target is folder, immediately ready to merge")
+                // Skip hovering state, go directly to mergeReady
+                if case .mergeReady(let currentTargetId) = state, currentTargetId == targetId {
+                    // Already ready for this target
+                    return
+                }
+                cancelHoverTimer()
+                internalState = .mergeReady(targetId: targetId)
+                updateMergeDisplayState()
+                onMergeReady?(targetId)
+                return
+            }
+
+            // For app targets, use hover delay
             // Check if we're already hovering over this target
             if case .mergeHovering(let currentTargetId, _) = state, currentTargetId == targetId {
                 // Continue hovering, timer will handle transition to mergeReady
+                print("   ⏳ Already hovering, waiting for timer...")
                 return
             }
+            print("   🆕 Starting hover on new target")
             transition(with: .enterMergeZone(targetId: targetId))
             startHoverTimer()
 
@@ -366,6 +400,7 @@ class DragStateMachine: ObservableObject {
     private func transition(with event: DragEvent) {
         let newState = nextState(for: event)
         if newState != internalState {
+            print("🔄 State transition: \(internalState) --[\(event)]--> \(newState)")
             internalState = newState
             updateMergeDisplayState()
         }
@@ -464,8 +499,10 @@ class DragStateMachine: ObservableObject {
 
     private func startHoverTimer() {
         cancelHoverTimer()
+        print("⏱️ Starting hover timer for \(mergeHoverDuration)s")
         hoverTimer = Timer.scheduledTimer(withTimeInterval: mergeHoverDuration, repeats: false) { [weak self] _ in
             DispatchQueue.main.async {
+                print("⏱️ Hover timer fired!")
                 self?.transition(with: .hoverTimerFired)
             }
         }
