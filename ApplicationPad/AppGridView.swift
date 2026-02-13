@@ -103,6 +103,11 @@ struct AppGridView: View {
             // Create position map: for each visual position in this page, which item?
             var result: [(position: Int, item: LauncherItem)] = []
 
+            // Determine which page fromIndex and toIndex belong to
+            let fromPage = fromIndex / appsPerPage
+            let toPage = toIndex / appsPerPage
+            let isCrossPageDrag = fromPage != toPage
+
             for visualPos in 0..<appsPerPage {
                 let globalVisualPos = start + visualPos
 
@@ -111,17 +116,42 @@ struct AppGridView: View {
                 if globalVisualPos == toIndex {
                     // Target position shows the dragging item
                     sourceIndex = fromIndex
-                } else if fromIndex < toIndex {
-                    // Dragging right: positions between from+1..to shift left by 1
-                    if globalVisualPos > fromIndex && globalVisualPos <= toIndex {
+                } else if isCrossPageDrag {
+                    // Cross-page drag: need special handling
+                    if page == fromPage {
+                        // On the source page: skip fromIndex, shift items to fill the gap
+                        if globalVisualPos >= fromIndex {
+                            sourceIndex = globalVisualPos + 1
+                        } else {
+                            sourceIndex = globalVisualPos
+                        }
+                    } else if page == toPage {
+                        // On the target page: make room at toIndex
+                        if globalVisualPos >= toIndex {
+                            sourceIndex = globalVisualPos - 1
+                        } else {
+                            sourceIndex = globalVisualPos
+                        }
+                    } else if page > fromPage && page < toPage {
+                        // Pages in between when dragging right: shift items left
+                        sourceIndex = globalVisualPos + 1
+                    } else if page < fromPage && page > toPage {
+                        // Pages in between when dragging left: shift items right
+                        sourceIndex = globalVisualPos - 1
+                    } else {
                         sourceIndex = globalVisualPos
+                    }
+                } else if fromIndex < toIndex {
+                    // Same page, dragging right: items between from+1..to shift left by 1
+                    if globalVisualPos >= fromIndex && globalVisualPos < toIndex {
+                        sourceIndex = globalVisualPos + 1
                     } else {
                         sourceIndex = globalVisualPos
                     }
                 } else {
-                    // Dragging left: positions between to..from-1 shift right by 1
-                    if globalVisualPos >= toIndex && globalVisualPos < fromIndex {
-                        sourceIndex = globalVisualPos + 1
+                    // Same page, dragging left: items between to+1..from shift right by 1
+                    if globalVisualPos > toIndex && globalVisualPos <= fromIndex {
+                        sourceIndex = globalVisualPos - 1
                     } else {
                         sourceIndex = globalVisualPos
                     }
@@ -129,8 +159,13 @@ struct AppGridView: View {
 
                 if sourceIndex >= 0 && sourceIndex < filteredItems.count {
                     let item = filteredItems[sourceIndex]
-                    // Skip empty slots
+                    // Skip empty slots and skip the dragging item if it's not at target position
+                    // This prevents duplicate items during cross-page drag
                     if !item.isEmpty {
+                        // Don't show the dragging item at its original position during cross-page drag
+                        if isCrossPageDrag && sourceIndex == fromIndex && globalVisualPos != toIndex {
+                            continue
+                        }
                         result.append((position: visualPos, item: item))
                     }
                 }
@@ -377,6 +412,8 @@ struct AppGridView: View {
                         },
                         onFolderUpdate: { updatedFolder in
                             updateFolder(updatedFolder)
+                            // Also update openFolder so FolderContentView sees the changes
+                            openFolder = updatedFolder
                         }
                     )
                 }
@@ -866,7 +903,9 @@ struct FolderOverlayView: View {
     private var appsPerPage: Int { folderRows * folderColumns }
 
     private var totalPages: Int {
-        max(1, Int(ceil(Double(folder.apps.count) / Double(appsPerPage))))
+        let pages = max(1, Int(ceil(Double(folder.apps.count) / Double(appsPerPage))))
+        print("📁 Folder pagination: apps=\(folder.apps.count), rows=\(folderRows), cols=\(folderColumns), perPage=\(appsPerPage), totalPages=\(pages)")
+        return pages
     }
 
     private func appsForPage(_ page: Int) -> [AppItem] {
@@ -880,7 +919,10 @@ struct FolderOverlayView: View {
     private func appsForPageWithDrag(_ page: Int) -> [(position: Int, app: AppItem)] {
         let start = page * appsPerPage
         let end = min(start + appsPerPage, folder.apps.count)
-        guard start < folder.apps.count else { return [] }
+        guard start < folder.apps.count else {
+            print("📁 appsForPageWithDrag(\(page)): empty - start=\(start) >= count=\(folder.apps.count)")
+            return []
+        }
 
         // During drag: show visual reordering
         if let dragging = draggingApp,
@@ -898,16 +940,16 @@ struct FolderOverlayView: View {
                     // Target position shows the dragging item
                     sourceIndex = fromIndex
                 } else if fromIndex < toIndex {
-                    // Dragging right: positions between from+1..to shift left by 1
-                    if globalVisualPos > fromIndex && globalVisualPos <= toIndex {
-                        sourceIndex = globalVisualPos
+                    // Dragging right: items between from+1..to shift left by 1
+                    if globalVisualPos >= fromIndex && globalVisualPos < toIndex {
+                        sourceIndex = globalVisualPos + 1
                     } else {
                         sourceIndex = globalVisualPos
                     }
                 } else {
-                    // Dragging left: positions between to..from-1 shift right by 1
-                    if globalVisualPos >= toIndex && globalVisualPos < fromIndex {
-                        sourceIndex = globalVisualPos + 1
+                    // Dragging left: items between to+1..from shift right by 1
+                    if globalVisualPos > toIndex && globalVisualPos <= fromIndex {
+                        sourceIndex = globalVisualPos - 1
                     } else {
                         sourceIndex = globalVisualPos
                     }
@@ -917,6 +959,7 @@ struct FolderOverlayView: View {
                     result.append((position: visualPos, app: folder.apps[sourceIndex]))
                 }
             }
+            print("📁 appsForPageWithDrag(\(page)): drag mode, returning \(result.count) items")
             return result
         }
 
@@ -925,6 +968,7 @@ struct FolderOverlayView: View {
         for (offset, index) in (start..<end).enumerated() {
             result.append((position: offset, app: folder.apps[index]))
         }
+        print("📁 appsForPageWithDrag(\(page)): normal mode, start=\(start), end=\(end), returning \(result.count) items")
         return result
     }
 
@@ -935,18 +979,21 @@ struct FolderOverlayView: View {
            fromIndex != toIndex {
             var updated = folder
             let movedApp = updated.apps.remove(at: fromIndex)
+            // After removal, indices shift: if toIndex > fromIndex, target is now at toIndex-1
             let insertIndex = toIndex > fromIndex ? toIndex - 1 : toIndex
             updated.apps.insert(movedApp, at: min(insertIndex, updated.apps.count))
             onFolderUpdate(updated)
+            print("📁 Folder reorder: \(fromIndex) -> \(toIndex), insertAt: \(insertIndex)")
+        } else {
+            print("📁 Folder drag ended without reorder: from=\(String(describing: dragCurrentIndex)), to=\(String(describing: dragTargetIndex))")
         }
 
-        withAnimation(.easeOut(duration: 0.2)) {
-            draggingApp = nil
-            draggingOffset = .zero
-            dragStartPosition = .zero
-            dragCurrentIndex = nil
-            dragTargetIndex = nil
-        }
+        // Clear drag state first (without animation), then update folder causes re-render
+        draggingApp = nil
+        draggingOffset = .zero
+        dragStartPosition = .zero
+        dragCurrentIndex = nil
+        dragTargetIndex = nil
     }
 
     // Calculate cell size based on launcher's cell size
@@ -1046,7 +1093,8 @@ struct FolderOverlayView: View {
                                         .scaleEffect(isDragging ? 1.1 : 1.0)
                                         .zIndex(isDragging ? 100 : 0)
                                         .opacity(isDragging ? 0.9 : 1.0)
-                                        .animation(isDragging ? nil : .easeInOut(duration: 0.2), value: position)
+                                        // Animate position changes for non-dragging items
+                                        .animation(isDragging ? nil : .easeInOut(duration: 0.2), value: globalIndex)
                                         .position(x: displayX, y: displayY)
                                         .highPriorityGesture(
                                             DragGesture(minimumDistance: 15)
