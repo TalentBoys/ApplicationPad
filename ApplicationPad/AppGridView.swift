@@ -399,11 +399,26 @@ struct AppGridView: View {
                   targetIndex < gridItems.count else { return }
 
             // Perform reorder
+            // After remove(at: currentIndex), indices shift:
+            // - Elements before currentIndex: unchanged
+            // - Elements at/after currentIndex: shift left by 1
+            //
+            // When dragging right (targetIndex > currentIndex):
+            //   The target element shifts from targetIndex to targetIndex-1
+            //   To place our item AFTER the target, insert at targetIndex (which is where the next element is now)
+            //   Example: [A,B,C] drag A(0) to B(1)'s position
+            //     remove(0) → [B,C], insert(at:1) → [B,A,C] ✓
+            //
+            // When dragging left (targetIndex < currentIndex):
+            //   The target element stays at targetIndex (it's before the removed position)
+            //   Insert at targetIndex to place AT the target position
+            //   Example: [A,B,C] drag C(2) to A(0)'s position
+            //     remove(2) → [A,B], insert(at:0) → [C,A,B] ✓
             withAnimation(.easeInOut(duration: 0.2)) {
                 gridItems.remove(at: currentIndex)
-                let newIndex = targetIndex > currentIndex ? targetIndex - 1 : targetIndex
-                gridItems.insert(dragging, at: min(newIndex, gridItems.count))
-                dragCurrentIndex = min(newIndex, gridItems.count - 1)
+                let newIndex = min(targetIndex, gridItems.count)
+                gridItems.insert(dragging, at: newIndex)
+                dragCurrentIndex = newIndex
             }
 
             // Calculate new cell position

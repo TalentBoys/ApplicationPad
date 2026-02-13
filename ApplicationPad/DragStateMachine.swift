@@ -87,7 +87,17 @@ enum HitZone: Equatable {
     case none
     case mergeZone(targetId: UUID, targetIndex: Int)
     case reorderZone(targetIndex: Int)
-    case betweenIcons(insertIndex: Int)
+}
+
+// MARK: - Reorder Info (for logging)
+
+struct ReorderInfo {
+    let draggingName: String
+    let draggingIndex: Int
+    let draggingPosition: CGPoint
+    let targetName: String
+    let targetIndex: Int
+    let targetCenter: CGPoint
 }
 
 // MARK: - Drag State Machine
@@ -117,6 +127,9 @@ class DragStateMachine: ObservableObject {
     private var lastHitZone: HitZone = .none
     private var lastUpdateTime: Date = .distantPast
     private let updateThrottleInterval: TimeInterval = 0.016 // ~60fps
+
+    // Reorder info cache (for logging)
+    private var pendingReorderInfo: ReorderInfo?
 
     // Callbacks
     var onReorder: ((Int) -> Void)?
@@ -228,9 +241,12 @@ class DragStateMachine: ObservableObject {
         currentPage: Int,
         appsPerPage: Int
     ) -> HitZone {
-        // Calculate which cell we're over
-        let col = Int((position.x - horizontalPadding) / cellWidth)
-        let row = Int((position.y - topPadding) / cellHeight)
+        // Clear pending reorder info
+        pendingReorderInfo = nil
+
+        // Calculate which cell we're over using floor for consistent behavior
+        let col = Int(floor((position.x - horizontalPadding) / cellWidth))
+        let row = Int(floor((position.y - topPadding) / cellHeight))
 
         // Bounds check
         guard col >= 0, col < columnsCount, row >= 0, row < rowsCount else {
@@ -252,34 +268,63 @@ class DragStateMachine: ObservableObject {
             return .none
         }
 
+        // Find dragging item and its current index
+        guard let draggingIndex = gridItems.firstIndex(where: { $0.id == draggingItemId }) else {
+            return .none
+        }
+        let draggingItem = gridItems[draggingIndex]
+
         // Calculate icon center position
         let iconCenterX = horizontalPadding + cellWidth * (CGFloat(col) + 0.5)
         let iconCenterY = topPadding + cellHeight * (CGFloat(row) + 0.5)
+        let targetCenter = CGPoint(x: iconCenterX, y: iconCenterY)
 
         // Calculate distance from icon center
         let dx = position.x - iconCenterX
         let dy = position.y - iconCenterY
+        let distanceFromCenter = hypot(dx, dy)
 
-        // Merge zone is center 60% of icon
-        let mergeZoneSize = iconSize * mergeZoneRatio
-        let halfMergeZone = mergeZoneSize / 2
+        // Use circular zones for symmetric hit detection
+        let mergeRadius = iconSize * mergeZoneRatio / 2
 
-        // Check if in merge zone (center rectangle)
-        let inMergeZone = abs(dx) <= halfMergeZone && abs(dy) <= halfMergeZone
-
-        // Check if in icon area at all (for reorder zone)
-        let halfIcon = iconSize / 2
-        let inIconArea = abs(dx) <= halfIcon && abs(dy) <= halfIcon
-
-        if inMergeZone {
+        if distanceFromCenter <= mergeRadius {
             return .mergeZone(targetId: targetItem.id, targetIndex: targetIndex)
-        } else if inIconArea {
-            // In edge zone (reorder zone)
-            return .reorderZone(targetIndex: targetIndex)
-        } else {
-            // Between icons - determine insertion point
-            return .betweenIcons(insertIndex: targetIndex)
         }
+
+        // For reorder: check if drag position has crossed the target's center
+        // This ensures we only swap when the dragged item truly "passes" the target
+        //
+        // Key insight: after a reorder, the dragging item's index changes in the array,
+        // but the user's intent is still based on their original drag direction.
+        // We should trigger reorder when the drag position crosses the target center,
+        // regardless of current indices (which change after each reorder).
+        let shouldTriggerReorder: Bool
+
+        // Simply check if we're past the center of the target cell
+        // If dragging position is right of center, we want to be at or after this position
+        // If dragging position is left of center, we want to be at or before this position
+        if position.x > iconCenterX {
+            // Position is right of target center - reorder if target is before us
+            shouldTriggerReorder = draggingIndex < targetIndex
+        } else {
+            // Position is left of target center - reorder if target is after us
+            shouldTriggerReorder = draggingIndex > targetIndex
+        }
+
+        if shouldTriggerReorder {
+            // Cache reorder info for logging when triggered
+            pendingReorderInfo = ReorderInfo(
+                draggingName: draggingItem.name,
+                draggingIndex: draggingIndex,
+                draggingPosition: position,
+                targetName: targetItem.name,
+                targetIndex: targetIndex,
+                targetCenter: targetCenter
+            )
+            return .reorderZone(targetIndex: targetIndex)
+        }
+
+        return .none
     }
 
     // MARK: - Process Hit Zone
@@ -290,7 +335,7 @@ class DragStateMachine: ObservableObject {
             transition(with: .highVelocityDetected)
 
             switch hitZone {
-            case .mergeZone(_, let index), .reorderZone(let index), .betweenIcons(let index):
+            case .mergeZone(_, let index), .reorderZone(let index):
                 transition(with: .enterReorderZone(targetIndex: index))
             case .none:
                 transition(with: .leaveTarget)
@@ -313,9 +358,6 @@ class DragStateMachine: ObservableObject {
 
         case .reorderZone(let targetIndex):
             transition(with: .enterReorderZone(targetIndex: targetIndex))
-
-        case .betweenIcons(let insertIndex):
-            transition(with: .enterReorderZone(targetIndex: insertIndex))
         }
     }
 
@@ -346,6 +388,13 @@ class DragStateMachine: ObservableObject {
         }
     }
 
+    private func triggerReorder(_ index: Int) {
+        if let info = pendingReorderInfo {
+            print("🔄 Reorder: [\(info.draggingName)][\(info.draggingIndex)] at (\(String(format: "%.1f", info.draggingPosition.x)), \(String(format: "%.1f", info.draggingPosition.y))) → [\(info.targetName)][\(info.targetIndex)] at (\(String(format: "%.1f", info.targetCenter.x)), \(String(format: "%.1f", info.targetCenter.y))) => newIndex=\(index)")
+        }
+        onReorder?(index)
+    }
+
     private func nextState(for event: DragEvent) -> DragState {
         switch (state, event) {
         // From idle
@@ -356,7 +405,7 @@ class DragStateMachine: ObservableObject {
         case (.dragging, .enterMergeZone(let targetId)):
             return .mergeHovering(targetId: targetId, startTime: Date())
         case (.dragging, .enterReorderZone(let index)):
-            onReorder?(index)
+            triggerReorder(index)
             return .reorderCandidate(targetIndex: index)
         case (.dragging, .endDrag):
             return .idle
@@ -365,7 +414,7 @@ class DragStateMachine: ObservableObject {
         case (.reorderCandidate, .enterMergeZone(let targetId)):
             return .mergeHovering(targetId: targetId, startTime: Date())
         case (.reorderCandidate, .enterReorderZone(let index)):
-            onReorder?(index)
+            triggerReorder(index)
             return .reorderCandidate(targetIndex: index)
         case (.reorderCandidate, .leaveTarget):
             return .dragging
@@ -378,7 +427,7 @@ class DragStateMachine: ObservableObject {
             return .mergeReady(targetId: targetId)
         case (.mergeHovering, .enterReorderZone(let index)):
             cancelHoverTimer()
-            onReorder?(index)
+            triggerReorder(index)
             return .reorderCandidate(targetIndex: index)
         case (.mergeHovering, .leaveTarget):
             cancelHoverTimer()
@@ -398,7 +447,7 @@ class DragStateMachine: ObservableObject {
         case (.mergeReady, .leaveTarget):
             return .dragging
         case (.mergeReady, .enterReorderZone(let index)):
-            onReorder?(index)
+            triggerReorder(index)
             return .reorderCandidate(targetIndex: index)
         case (.mergeReady, .highVelocityDetected):
             return .dragging
