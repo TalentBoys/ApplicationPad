@@ -19,7 +19,7 @@ class LauncherPanel: NSPanel {
             defer: false
         )
 
-        self.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()))
+        self.level = .popUpMenu
         self.backgroundColor = .clear
         self.isOpaque = false
         self.hasShadow = false
