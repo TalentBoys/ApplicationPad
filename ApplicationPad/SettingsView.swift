@@ -15,7 +15,8 @@ struct SettingsView: View {
     @AppStorage("columnsCount") private var columnsCount: Int = 8
     @AppStorage("rowsCount") private var rowsCount: Int = 5
     @AppStorage("horizontalPadding") private var horizontalPadding: Double = 120
-    @AppStorage("verticalPadding") private var verticalPadding: Double = 40
+    @AppStorage("topPadding") private var topPadding: Double = 20
+    @AppStorage("bottomPadding") private var bottomPadding: Double = 40
 
     @State private var isRecordingHotkey = false
 
@@ -97,9 +98,16 @@ struct SettingsView: View {
                 }
 
                 HStack {
-                    Text("Vertical Padding")
-                    Slider(value: $verticalPadding, in: 0...200, step: 10)
-                    Text("\(Int(verticalPadding))")
+                    Text("Top Padding")
+                    Slider(value: $topPadding, in: 0...200, step: 10)
+                    Text("\(Int(topPadding))")
+                        .frame(width: 50)
+                }
+
+                HStack {
+                    Text("Bottom Padding")
+                    Slider(value: $bottomPadding, in: 0...200, step: 10)
+                    Text("\(Int(bottomPadding))")
                         .frame(width: 50)
                 }
 
@@ -108,7 +116,8 @@ struct SettingsView: View {
                     columnsCount = 8
                     rowsCount = 5
                     horizontalPadding = 120
-                    verticalPadding = 40
+                    topPadding = 20
+                    bottomPadding = 40
                 }
                 .font(.caption)
             } header: {
@@ -124,7 +133,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 550, height: 480)
+        .frame(width: 550, height: 520)
     }
 }
 

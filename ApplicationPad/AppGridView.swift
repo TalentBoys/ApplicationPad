@@ -19,7 +19,8 @@ struct AppGridView: View {
     var appsPerPage: Int { LauncherSettings.appsPerPage }
     var iconSize: CGFloat { LauncherSettings.iconSize }
     var horizontalPadding: CGFloat { LauncherSettings.horizontalPadding }
-    var verticalPadding: CGFloat { LauncherSettings.verticalPadding }
+    var topPadding: CGFloat { LauncherSettings.topPadding }
+    var bottomPadding: CGFloat { LauncherSettings.bottomPadding }
 
     var filteredApps: [AppItem] {
         let key = searchText.lowercased()
@@ -52,10 +53,11 @@ struct AppGridView: View {
         GeometryReader { geometry in
             let screenWidth = geometry.size.width
             let screenHeight = geometry.size.height
+            let notchHeight: CGFloat = 50
             let searchHeight: CGFloat = 60
             let pageIndicatorHeight: CGFloat = totalPages > 1 ? 50 : 0
             let availableWidth = screenWidth - horizontalPadding * 2
-            let availableHeight = screenHeight - searchHeight - pageIndicatorHeight - verticalPadding * 2
+            let availableHeight = screenHeight - notchHeight - searchHeight - pageIndicatorHeight - topPadding - bottomPadding
             let cellWidth = availableWidth / CGFloat(columnsCount)
             let cellHeight = availableHeight / CGFloat(rowsCount)
 
@@ -68,6 +70,8 @@ struct AppGridView: View {
                     }
 
                 VStack(spacing: 0) {
+                    Spacer()
+                        .frame(height: notchHeight)
                     // Search box
                     TextField("Search applications", text: $searchText)
                         .textFieldStyle(.roundedBorder)
@@ -89,7 +93,7 @@ struct AppGridView: View {
                                         let row = index / columnsCount
                                         let col = index % columnsCount
                                         let x = horizontalPadding + cellWidth * (CGFloat(col) + 0.5)
-                                        let y = verticalPadding + cellHeight * (CGFloat(row) + 0.5)
+                                        let y = topPadding + cellHeight * (CGFloat(row) + 0.5)
 
                                         AppItemView(app: app, iconSize: iconSize) {
                                             apps = AppScanner.scan()
@@ -114,7 +118,7 @@ struct AppGridView: View {
                                 }
                         )
                     }
-                    .frame(height: availableHeight + verticalPadding * 2)
+                    .frame(height: availableHeight + topPadding + bottomPadding)
 
                     // Page indicator
                     if totalPages > 1 {
@@ -181,7 +185,7 @@ struct AppItemView: View {
 
             Text(app.name)
                 .font(iconSize > 64 ? .callout : .caption)
-                .foregroundColor(.white)
+                .foregroundColor(.primary)
                 .lineLimit(1)
         }
         .padding(8)

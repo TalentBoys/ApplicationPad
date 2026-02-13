@@ -28,9 +28,14 @@ struct LauncherSettings {
         set { UserDefaults.standard.set(Double(newValue), forKey: "horizontalPadding") }
     }
 
-    static var verticalPadding: CGFloat {
-        get { CGFloat(UserDefaults.standard.object(forKey: "verticalPadding") as? Double ?? 40) }
-        set { UserDefaults.standard.set(Double(newValue), forKey: "verticalPadding") }
+    static var topPadding: CGFloat {
+        get { CGFloat(UserDefaults.standard.object(forKey: "topPadding") as? Double ?? 20) }
+        set { UserDefaults.standard.set(Double(newValue), forKey: "topPadding") }
+    }
+
+    static var bottomPadding: CGFloat {
+        get { CGFloat(UserDefaults.standard.object(forKey: "bottomPadding") as? Double ?? 40) }
+        set { UserDefaults.standard.set(Double(newValue), forKey: "bottomPadding") }
     }
 
     static var appsPerPage: Int {
