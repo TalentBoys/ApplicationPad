@@ -192,6 +192,11 @@ struct AppGridView: View {
 
     private func startScrollMonitor() {
         scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
+            // Ignore momentum (inertia) phase - only respond to actual user scrolling
+            if event.momentumPhase != [] {
+                return event
+            }
+
             let invert: CGFloat = LauncherSettings.invertScroll ? -1 : 1
             let sensitivity = LauncherSettings.scrollSensitivity
 
