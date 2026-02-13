@@ -10,7 +10,7 @@ import SwiftUI
 struct AppGridView: View {
     @State private var searchText = ""
     @State private var apps = AppScanner.scan()
-    @State private var orderedApps: [AppItem] = []  // Display order, updated during drag
+    @State private var gridItems: [LauncherItem] = []  // Display order, updated during drag
     @State private var keyMonitor = KeyEventMonitor()
     @State private var currentPage = 0
     @State private var dragOffset: CGFloat = 0
@@ -20,11 +20,30 @@ struct AppGridView: View {
     @FocusState private var isSearchFocused: Bool
 
     // Drag-to-reorder state
-    @State private var draggingApp: AppItem?
+    @State private var draggingItem: LauncherItem?
     @State private var draggingOffset: CGSize = .zero
     @State private var dragCurrentIndex: Int?
-    @State private var dragStartPosition: CGPoint = .zero  // Initial position when drag started
-    @State private var isDraggingPage: Bool = false  // Track if we're dragging the page
+    @State private var dragStartPosition: CGPoint = .zero
+    @State private var dragAccumulatedOffset: CGSize = .zero  // Compensate for dragStartPosition changes
+    @State private var isDraggingPage: Bool = false
+
+    // State machine for drag behavior
+    @StateObject private var dragStateMachine = DragStateMachine()
+
+    // Folder merge state (derived from state machine)
+    private var mergeTargetId: UUID? {
+        dragStateMachine.mergeState.targetId
+    }
+    private var isMergeHovering: Bool {
+        dragStateMachine.mergeState.isHovering
+    }
+    private var isMergeReady: Bool {
+        dragStateMachine.mergeState.isReady
+    }
+
+    // Open folder state
+    @State private var openFolder: FolderItem?
+    @State private var openFolderPosition: CGPoint = .zero
 
     var columnsCount: Int { LauncherSettings.columnsCount }
     var rowsCount: Int { LauncherSettings.rowsCount }
@@ -34,48 +53,51 @@ struct AppGridView: View {
     var topPadding: CGFloat { LauncherSettings.topPadding }
     var bottomPadding: CGFloat { LauncherSettings.bottomPadding }
 
-    var filteredApps: [AppItem] {
+    var filteredItems: [LauncherItem] {
         let key = searchText.lowercased()
         if key.isEmpty {
-            return orderedApps.isEmpty ? LauncherSettings.applyCustomOrder(to: apps) : orderedApps
+            return gridItems.isEmpty ? LauncherSettings.applyCustomOrder(to: apps) : gridItems
         }
-        return apps.filter {
+        // When searching, flatten folders and search all apps
+        var allApps: [AppItem] = []
+        for item in gridItems {
+            switch item {
+            case .app(let app):
+                allApps.append(app)
+            case .folder(let folder):
+                allApps.append(contentsOf: folder.apps)
+            }
+        }
+        return allApps.filter {
             $0.name.localizedCaseInsensitiveContains(key)
             || $0.pinyinName.contains(key)
             || $0.pinyinInitials.contains(key)
         }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        .map { .app($0) }
     }
 
-    private func refreshOrderedApps() {
-        orderedApps = LauncherSettings.applyCustomOrder(to: apps)
+    private func refreshGridItems() {
+        gridItems = LauncherSettings.applyCustomOrder(to: apps)
     }
 
     var totalPages: Int {
-        max(1, Int(ceil(Double(filteredApps.count) / Double(appsPerPage))))
+        max(1, Int(ceil(Double(filteredItems.count) / Double(appsPerPage))))
     }
 
-    var columns: [GridItem] {
-        Array(repeating: GridItem(.flexible(), spacing: 20), count: columnsCount)
-    }
-
-    func appsForPage(_ page: Int) -> [AppItem] {
+    func itemsForPage(_ page: Int) -> [LauncherItem] {
         let start = page * appsPerPage
-        let end = min(start + appsPerPage, filteredApps.count)
-        guard start < filteredApps.count else { return [] }
-        return Array(filteredApps[start..<end])
+        let end = min(start + appsPerPage, filteredItems.count)
+        guard start < filteredItems.count else { return [] }
+        return Array(filteredItems[start..<end])
     }
 
     var body: some View {
         GeometryReader { geometry in
-            let screenWidth = geometry.size.width
             let screenHeight = geometry.size.height
             let notchHeight: CGFloat = 50
             let searchHeight: CGFloat = 60
             let pageIndicatorHeight: CGFloat = totalPages > 1 ? 50 : 0
-            let availableWidth = screenWidth - horizontalPadding * 2
             let availableHeight = screenHeight - notchHeight - searchHeight - pageIndicatorHeight - topPadding - bottomPadding
-            let cellWidth = availableWidth / CGFloat(columnsCount)
-            let cellHeight = availableHeight / CGFloat(rowsCount)
 
             ZStack {
                 VStack(spacing: 0) {
@@ -100,47 +122,69 @@ struct AppGridView: View {
                         ZStack {
                             HStack(spacing: 0) {
                                 ForEach(0..<totalPages, id: \.self) { page in
-                                    let pageApps = appsForPage(page)
+                                    let pageItems = itemsForPage(page)
                                     ZStack {
-                                        ForEach(Array(pageApps.enumerated()), id: \.element.url) { index, app in
+                                        ForEach(Array(pageItems.enumerated()), id: \.element.id) { index, item in
                                             let globalIndex = page * appsPerPage + index
                                             let row = index / columnsCount
                                             let col = index % columnsCount
                                             let x = horizontalPadding + cellWidth * (CGFloat(col) + 0.5)
                                             let y = topPadding + cellHeight * (CGFloat(row) + 0.5)
-                                            let isDragging = draggingApp?.url == app.url
+                                            let isDragging = draggingItem?.id == item.id
+                                            let isMergeTarget = mergeTargetId == item.id
+                                            let isMergeHoveringTarget = isMergeHovering && isMergeTarget
+                                            let isMergeReadyTarget = isMergeReady && isMergeTarget
 
-                                            // For dragging item: use start position + offset
-                                            // For other items: use grid position with animation
                                             let displayX = isDragging ? dragStartPosition.x : x
                                             let displayY = isDragging ? dragStartPosition.y : y
 
-                                            AppItemView(app: app, iconSize: iconSize) {
-                                                apps = AppScanner.scan()
-                                                refreshOrderedApps()
-                                            }
+                                            GridItemView(
+                                                item: item,
+                                                iconSize: iconSize,
+                                                isMergeTarget: isMergeTarget,
+                                                isMergeHovering: isMergeHoveringTarget,
+                                                isMergeReady: isMergeReadyTarget,
+                                                onTap: {
+                                                    handleItemTap(item: item, position: CGPoint(x: x, y: y))
+                                                },
+                                                onAppLaunch: {
+                                                    apps = AppScanner.scan()
+                                                    refreshGridItems()
+                                                }
+                                            )
                                             .position(x: displayX, y: displayY)
                                             .offset(isDragging ? draggingOffset : .zero)
-                                            .scaleEffect(isDragging ? 1.1 : 1.0)
+                                            .scaleEffect(isDragging ? 1.1 : (isMergeReadyTarget ? 1.15 : (isMergeHoveringTarget ? 0.9 : 1.0)))
                                             .zIndex(isDragging ? 100 : 0)
                                             .opacity(isDragging ? 0.9 : 1.0)
-                                            .animation(isDragging ? nil : .easeInOut(duration: 0.2), value: orderedApps.map { $0.url })
+                                            .animation(.easeInOut(duration: 0.2), value: globalIndex)
+                                            .animation(.spring(response: 0.25, dampingFraction: 0.7), value: isMergeHoveringTarget)
+                                            .animation(.spring(response: 0.2, dampingFraction: 0.6), value: isMergeReadyTarget)
                                             .highPriorityGesture(
                                                 DragGesture(minimumDistance: 15)
                                                     .onChanged { drag in
-                                                        // Start dragging on first trigger (distance exceeded)
-                                                        if draggingApp == nil && searchText.isEmpty {
-                                                            draggingApp = app
+                                                        if draggingItem == nil && searchText.isEmpty {
+                                                            draggingItem = item
                                                             dragCurrentIndex = globalIndex
                                                             dragStartPosition = CGPoint(x: x, y: y)
+                                                            dragAccumulatedOffset = .zero
+                                                            dragStateMachine.startDrag()
+                                                            setupStateMachineCallbacks(cellWidth: cellWidth, cellHeight: cellHeight)
+                                                            print("=== DRAG START ===")
+                                                            print("item: \(item.name), globalIndex: \(globalIndex)")
+                                                            print("dragStartPosition: \(dragStartPosition)")
+                                                            print("==================")
                                                         }
 
-                                                        if draggingApp?.url == app.url {
-                                                            draggingOffset = drag.translation
+                                                        if draggingItem?.id == item.id {
+                                                            // Apply accumulated offset to compensate for dragStartPosition changes
+                                                            draggingOffset = CGSize(
+                                                                width: drag.translation.width + dragAccumulatedOffset.width,
+                                                                height: drag.translation.height + dragAccumulatedOffset.height
+                                                            )
 
-                                                            // Calculate target position based on start position
-                                                            let dragX = dragStartPosition.x + drag.translation.width
-                                                            let dragY = dragStartPosition.y + drag.translation.height
+                                                            let dragX = dragStartPosition.x + draggingOffset.width
+                                                            let dragY = dragStartPosition.y + draggingOffset.height
 
                                                             updateDragPosition(
                                                                 dragX: dragX,
@@ -151,7 +195,11 @@ struct AppGridView: View {
                                                         }
                                                     }
                                                     .onEnded { _ in
-                                                        if draggingApp?.url == app.url {
+                                                        if draggingItem?.id == item.id {
+                                                            print("=== DRAG END ===")
+                                                            print("final dragStartPosition: \(dragStartPosition)")
+                                                            print("final draggingOffset: \(draggingOffset)")
+                                                            print("================")
                                                             finishDragging()
                                                         }
                                                     }
@@ -164,26 +212,25 @@ struct AppGridView: View {
                             .offset(x: -CGFloat(currentPage) * geo.size.width + dragOffset)
                             .animation(.easeInOut(duration: 0.3), value: currentPage)
                         }
-                        .contentShape(Rectangle())  // Make entire area respond to gestures
+                        .contentShape(Rectangle())
                         .onTapGesture {
-                            // Tap on empty area to close
-                            print("[TAP] Grid area tapped, isDraggingPage=\(isDraggingPage), draggingApp=\(draggingApp?.name ?? "nil")")
-                            if !isDraggingPage && draggingApp == nil {
-                                print("[TAP] Closing launcher")
-                                closeLauncher()
+                            if !isDraggingPage && draggingItem == nil {
+                                if openFolder != nil {
+                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                        openFolder = nil
+                                    }
+                                } else {
+                                    closeLauncher()
+                                }
                             }
                         }
                         .gesture(
                             DragGesture(minimumDistance: 15)
                                 .onChanged { value in
-                                    print("[PAGE_DRAG] onChanged, draggingApp=\(draggingApp?.name ?? "nil")")
-                                    // Only handle page swipe if not dragging an app
-                                    if draggingApp == nil {
+                                    if draggingItem == nil {
                                         isDraggingPage = true
-                                        print("[PAGE_DRAG] Set isDraggingPage=true")
                                         dragOffset = value.translation.width
 
-                                        // Apply boundary resistance
                                         if currentPage == 0 && dragOffset > 0 {
                                             dragOffset = min(dragOffset, 100)
                                         } else if currentPage == totalPages - 1 && dragOffset < 0 {
@@ -192,8 +239,7 @@ struct AppGridView: View {
                                     }
                                 }
                                 .onEnded { value in
-                                    print("[PAGE_DRAG] onEnded, isDraggingPage=\(isDraggingPage)")
-                                    if draggingApp == nil {
+                                    if draggingItem == nil {
                                         let threshold = geo.size.width * 0.2
 
                                         withAnimation(.easeInOut(duration: 0.3)) {
@@ -206,7 +252,6 @@ struct AppGridView: View {
                                         }
                                     }
                                     isDraggingPage = false
-                                    print("[PAGE_DRAG] Reset isDraggingPage=false")
                                 }
                         )
                         .onAppear {
@@ -241,22 +286,76 @@ struct AppGridView: View {
                         .frame(height: pageIndicatorHeight)
                     }
                 }
+
+                // Folder overlay
+                if let folder = openFolder {
+                    FolderOverlayView(
+                        folder: folder,
+                        iconSize: iconSize,
+                        position: openFolderPosition,
+                        onClose: {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                openFolder = nil
+                            }
+                        },
+                        onAppLaunch: {
+                            apps = AppScanner.scan()
+                            refreshGridItems()
+                        },
+                        onFolderUpdate: { updatedFolder in
+                            updateFolder(updatedFolder)
+                        }
+                    )
+                }
             }
         }
         .onAppear {
-            refreshOrderedApps()
+            refreshGridItems()
             focusSearchField()
             keyMonitor.startEscListener {
-                closeLauncher()
+                if openFolder != nil {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        openFolder = nil
+                    }
+                } else {
+                    closeLauncher()
+                }
             }
         }
         .onDisappear {
             keyMonitor.stop()
             searchText = ""
             currentPage = 0
+            openFolder = nil
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
             focusSearchField()
+        }
+    }
+
+    private func handleItemTap(item: LauncherItem, position: CGPoint) {
+        if case .folder(let folder) = item {
+            openFolderPosition = position
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                openFolder = folder
+            }
+        }
+    }
+
+    private func updateFolder(_ updatedFolder: FolderItem) {
+        if let index = gridItems.firstIndex(where: {
+            if case .folder(let f) = $0 { return f.id == updatedFolder.id }
+            return false
+        }) {
+            if updatedFolder.apps.isEmpty {
+                gridItems.remove(at: index)
+            } else if updatedFolder.apps.count == 1 {
+                // Folder has only one app, convert back to single app
+                gridItems[index] = .app(updatedFolder.apps[0])
+            } else {
+                gridItems[index] = .folder(updatedFolder)
+            }
+            LauncherSettings.saveGridItems(gridItems)
         }
     }
 
@@ -270,49 +369,161 @@ struct AppGridView: View {
         LauncherPanel.shared.close()
         searchText = ""
         currentPage = 0
+        openFolder = nil
     }
 
     private func updateDragPosition(dragX: CGFloat, dragY: CGFloat, cellWidth: CGFloat, cellHeight: CGFloat) {
-        guard let currentIndex = dragCurrentIndex, draggingApp != nil else { return }
+        guard let _ = dragCurrentIndex, let dragging = draggingItem else { return }
 
-        // Calculate target cell
-        let col = Int((dragX - horizontalPadding) / cellWidth)
-        let row = Int((dragY - topPadding) / cellHeight)
+        // Use state machine for hit detection and state management
+        dragStateMachine.updateDrag(
+            position: CGPoint(x: dragX, y: dragY),
+            gridItems: gridItems,
+            draggingItemId: dragging.id,
+            cellWidth: cellWidth,
+            cellHeight: cellHeight,
+            iconSize: iconSize,
+            columnsCount: columnsCount,
+            rowsCount: rowsCount,
+            horizontalPadding: horizontalPadding,
+            topPadding: topPadding,
+            currentPage: currentPage,
+            appsPerPage: appsPerPage
+        )
+    }
 
-        // Validate bounds
-        guard col >= 0, col < columnsCount, row >= 0, row < rowsCount else { return }
+    private func setupStateMachineCallbacks(cellWidth: CGFloat, cellHeight: CGFloat) {
+        dragStateMachine.onReorder = { [self] targetIndex in
+            guard let currentIndex = dragCurrentIndex,
+                  let dragging = draggingItem,
+                  targetIndex != currentIndex,
+                  targetIndex >= 0,
+                  targetIndex < gridItems.count else { return }
 
-        let targetIndexInPage = row * columnsCount + col
-        let targetIndex = currentPage * appsPerPage + targetIndexInPage
+            print("=== REORDER ===")
+            print("currentIndex: \(currentIndex) -> targetIndex: \(targetIndex)")
+            print("BEFORE: dragStartPosition: \(dragStartPosition)")
+            print("BEFORE: dragAccumulatedOffset: \(dragAccumulatedOffset)")
 
-        // Validate target index and check if changed
-        guard targetIndex >= 0, targetIndex < orderedApps.count, targetIndex != currentIndex else { return }
+            // Perform reorder
+            withAnimation(.easeInOut(duration: 0.2)) {
+                gridItems.remove(at: currentIndex)
+                let newIndex = targetIndex > currentIndex ? targetIndex - 1 : targetIndex
+                gridItems.insert(dragging, at: min(newIndex, gridItems.count))
+                dragCurrentIndex = min(newIndex, gridItems.count - 1)
+                print("newIndex in gridItems: \(dragCurrentIndex!)")
+            }
 
-        // Move the app in the array
-        withAnimation(.easeInOut(duration: 0.15)) {
-            let app = orderedApps.remove(at: currentIndex)
-            orderedApps.insert(app, at: targetIndex)
-            dragCurrentIndex = targetIndex
+            // Calculate new cell position
+            let newIndexInPage = dragCurrentIndex! % appsPerPage
+            let newRow = newIndexInPage / columnsCount
+            let newCol = newIndexInPage % columnsCount
+            let newStartPosition = CGPoint(
+                x: horizontalPadding + cellWidth * (CGFloat(newCol) + 0.5),
+                y: topPadding + cellHeight * (CGFloat(newRow) + 0.5)
+            )
+
+            // Accumulate the offset to compensate for dragStartPosition change
+            // When dragStartPosition moves by delta, we need to add -delta to accumulated offset
+            // so that: newStartPosition + (translation + newAccumulated) = oldStartPosition + (translation + oldAccumulated)
+            let deltaX = newStartPosition.x - dragStartPosition.x
+            let deltaY = newStartPosition.y - dragStartPosition.y
+            dragAccumulatedOffset = CGSize(
+                width: dragAccumulatedOffset.width - deltaX,
+                height: dragAccumulatedOffset.height - deltaY
+            )
+            dragStartPosition = newStartPosition
+
+            print("AFTER: dragStartPosition: \(dragStartPosition)")
+            print("AFTER: dragAccumulatedOffset: \(dragAccumulatedOffset)")
+            print("delta: (\(deltaX), \(deltaY))")
+            print("===============")
+        }
+
+        dragStateMachine.onMergeReady = { targetId in
+            // Visual feedback is handled by state machine state
+            // Haptic feedback for trackpad
+            NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .default)
         }
     }
 
+    private func performMerge(draggingItem: LauncherItem, targetItem: LauncherItem, targetIndex: Int, currentIndex: Int) {
+        // Get apps from both items
+        var appsToMerge: [AppItem] = []
+
+        switch targetItem {
+        case .app(let app):
+            appsToMerge.append(app)
+        case .folder(let folder):
+            appsToMerge.append(contentsOf: folder.apps)
+        }
+
+        switch draggingItem {
+        case .app(let app):
+            appsToMerge.append(app)
+        case .folder(let folder):
+            appsToMerge.append(contentsOf: folder.apps)
+        }
+
+        // Create new folder
+        let folderName = "Folder"  // Default name
+        let newFolder = FolderItem(name: folderName, apps: appsToMerge)
+
+        // Update grid items
+        withAnimation(.easeInOut(duration: 0.2)) {
+            // Remove both items (remove higher index first to avoid index shifting issues)
+            let indicesToRemove = [currentIndex, targetIndex].sorted(by: >)
+            for idx in indicesToRemove {
+                gridItems.remove(at: idx)
+            }
+
+            // Insert folder at the lower index
+            let insertIndex = min(currentIndex, targetIndex)
+            gridItems.insert(.folder(newFolder), at: min(insertIndex, gridItems.count))
+        }
+
+        // Clear dragging state
+        self.draggingItem = nil
+        draggingOffset = .zero
+        dragCurrentIndex = nil
+        dragStartPosition = .zero
+        dragAccumulatedOffset = .zero
+        dragStateMachine.reset()
+
+        // Save
+        LauncherSettings.saveGridItems(gridItems)
+    }
+
     private func finishDragging() {
+        // Ask state machine if we should merge
+        let (shouldMerge, targetId) = dragStateMachine.endDrag()
+
+        if shouldMerge,
+           let targetId = targetId,
+           let currentIndex = dragCurrentIndex,
+           let dragging = draggingItem,
+           let targetIndex = gridItems.firstIndex(where: { $0.id == targetId }) {
+            let targetItem = gridItems[targetIndex]
+            performMerge(draggingItem: dragging, targetItem: targetItem, targetIndex: targetIndex, currentIndex: currentIndex)
+            return
+        }
+
         // Save the final order
-        if !orderedApps.isEmpty {
-            LauncherSettings.saveAppOrder(orderedApps)
+        if !gridItems.isEmpty {
+            LauncherSettings.saveGridItems(gridItems)
         }
 
         withAnimation(.easeOut(duration: 0.2)) {
-            draggingApp = nil
+            draggingItem = nil
             draggingOffset = .zero
             dragCurrentIndex = nil
             dragStartPosition = .zero
+            dragAccumulatedOffset = .zero
         }
     }
 
     private func startScrollMonitor() {
         scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
-            // Ignore momentum (inertia) phase - only respond to actual user scrolling
             if event.momentumPhase != [] {
                 return event
             }
@@ -323,27 +534,21 @@ struct AppGridView: View {
             let deltaX = event.scrollingDeltaX * invert * sensitivity
             let deltaY = event.scrollingDeltaY * invert * sensitivity
 
-            // Combine horizontal and vertical: left/up = previous page, right/down = next page
             let delta = deltaX - deltaY
 
-            // Skip if no meaningful delta
             guard abs(delta) > 0.1 else { return event }
 
-            // Update drag offset for visual feedback
             dragOffset += delta
 
-            // Limit drag offset to one page width
             let maxOffset = pageWidth > 0 ? pageWidth : 1000
             dragOffset = max(-maxOffset, min(maxOffset, dragOffset))
 
-            // Clamp drag offset at boundaries with resistance
             if currentPage == 0 && dragOffset > 0 {
                 dragOffset = min(dragOffset, 100)
             } else if currentPage == totalPages - 1 && dragOffset < 0 {
                 dragOffset = max(dragOffset, -100)
             }
 
-            // Reset timer for detecting scroll end
             scrollEndTimer?.invalidate()
             scrollEndTimer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: false) { _ in
                 DispatchQueue.main.async {
@@ -375,37 +580,244 @@ struct AppGridView: View {
     }
 }
 
-struct AppItemView: View {
-    let app: AppItem
-    let iconSize: CGFloat
-    var onLaunch: () -> Void = {}
+// MARK: - Grid Item View
 
+struct GridItemView: View {
+    let item: LauncherItem
+    let iconSize: CGFloat
+    var isMergeTarget: Bool = false
+    var isMergeHovering: Bool = false
+    var isMergeReady: Bool = false
+    var onTap: () -> Void = {}
+    var onAppLaunch: () -> Void = {}
+
+    // Cache icon to avoid repeated lookups
+    @State private var cachedIcon: NSImage?
     @State private var isHovered = false
+
+    private var backgroundColor: Color {
+        if isMergeReady {
+            return Color.blue.opacity(0.4)
+        } else if isMergeHovering {
+            return Color.blue.opacity(0.2)
+        } else if isHovered {
+            return Color.white.opacity(0.2)
+        }
+        return Color.clear
+    }
+
+    private var borderColor: Color {
+        if isMergeReady {
+            return Color.blue
+        } else if isMergeHovering {
+            return Color.blue.opacity(0.5)
+        }
+        return Color.clear
+    }
+
+    private var borderWidth: CGFloat {
+        isMergeReady ? 3 : 2
+    }
 
     var body: some View {
         VStack {
-            Image(nsImage: app.icon)
-                .resizable()
-                .frame(width: iconSize, height: iconSize)
-                .scaleEffect(isHovered ? 1.1 : 1.0)
-                .animation(.easeOut(duration: 0.15), value: isHovered)
+            ZStack {
+                // Folder preview background (appears during merge hovering)
+                if isMergeHovering || isMergeReady {
+                    RoundedRectangle(cornerRadius: iconSize * 0.2)
+                        .fill(Color.gray.opacity(0.4))
+                        .frame(width: iconSize * 1.1, height: iconSize * 1.1)
+                }
 
-            Text(app.name)
+                Image(nsImage: cachedIcon ?? item.icon)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: iconSize, height: iconSize)
+                    .scaleEffect(isHovered ? 1.1 : 1.0)
+                    .animation(.easeOut(duration: 0.15), value: isHovered)
+            }
+
+            Text(item.name)
                 .font(iconSize > 64 ? .callout : .caption)
                 .foregroundColor(.primary)
                 .lineLimit(1)
         }
         .padding(8)
-        .background(isHovered ? Color.white.opacity(0.2) : Color.clear)
-        .cornerRadius(8)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(backgroundColor)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(borderColor, lineWidth: borderWidth)
+        )
         .onHover { hovering in
             isHovered = hovering
         }
         .onTapGesture {
-            app.markUsed()
-            NSWorkspace.shared.open(app.url)
-            onLaunch()
-            LauncherPanel.shared.close()
+            switch item {
+            case .app(let app):
+                app.markUsed()
+                NSWorkspace.shared.open(app.url)
+                onAppLaunch()
+                LauncherPanel.shared.close()
+            case .folder:
+                onTap()
+            }
+        }
+        .onAppear {
+            // Cache icon on appear
+            if cachedIcon == nil {
+                cachedIcon = item.icon
+            }
+        }
+    }
+}
+
+// MARK: - Folder Overlay View
+
+struct FolderOverlayView: View {
+    let folder: FolderItem
+    let iconSize: CGFloat
+    let position: CGPoint
+    let onClose: () -> Void
+    let onAppLaunch: () -> Void
+    let onFolderUpdate: (FolderItem) -> Void
+
+    @State private var folderName: String
+    @State private var isEditingName = false
+
+    init(folder: FolderItem, iconSize: CGFloat, position: CGPoint, onClose: @escaping () -> Void, onAppLaunch: @escaping () -> Void, onFolderUpdate: @escaping (FolderItem) -> Void) {
+        self.folder = folder
+        self.iconSize = iconSize
+        self.position = position
+        self.onClose = onClose
+        self.onAppLaunch = onAppLaunch
+        self.onFolderUpdate = onFolderUpdate
+        self._folderName = State(initialValue: folder.name)
+    }
+
+    private let folderWidth: CGFloat = 320
+    private let folderHeight: CGFloat = 280
+
+    var body: some View {
+        GeometryReader { geo in
+            // Calculate position to keep folder within bounds
+            let safeX = min(max(folderWidth / 2 + 20, position.x), geo.size.width - folderWidth / 2 - 20)
+            let safeY = min(max(folderHeight / 2 + 80, position.y), geo.size.height - folderHeight / 2 - 20)
+
+            ZStack {
+                // Dimmed background
+                Color.black.opacity(0.3)
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        onClose()
+                    }
+
+                // Folder content
+                VStack(spacing: 12) {
+                    // Folder name (editable)
+                    if isEditingName {
+                        TextField("Folder Name", text: $folderName)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 200)
+                            .multilineTextAlignment(.center)
+                            .onSubmit {
+                                isEditingName = false
+                                var updated = folder
+                                updated.name = folderName
+                                onFolderUpdate(updated)
+                            }
+                    } else {
+                        Text(folderName)
+                            .font(.headline)
+                            .foregroundColor(.white)
+                            .onTapGesture {
+                                isEditingName = true
+                            }
+                    }
+
+                    // Apps grid
+                    let columns = Array(repeating: GridItem(.flexible(), spacing: 12), count: 3)
+                    LazyVGrid(columns: columns, spacing: 12) {
+                        ForEach(folder.apps) { app in
+                            FolderAppItemView(
+                                app: app,
+                                iconSize: iconSize * 0.7,
+                                onTap: {
+                                    app.markUsed()
+                                    NSWorkspace.shared.open(app.url)
+                                    onAppLaunch()
+                                    onClose()
+                                    LauncherPanel.shared.close()
+                                },
+                                onRemove: {
+                                    var updated = folder
+                                    updated.apps.removeAll { $0.url == app.url }
+                                    onFolderUpdate(updated)
+                                    if updated.apps.isEmpty {
+                                        onClose()
+                                    }
+                                }
+                            )
+                        }
+                    }
+                    .padding()
+                }
+                .frame(width: folderWidth, height: folderHeight)
+                .background(
+                    RoundedRectangle(cornerRadius: 20)
+                        .fill(Color.gray.opacity(0.8))
+                        .background(.ultraThinMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 20))
+                )
+                .position(x: safeX, y: safeY)
+            }
+        }
+        .transition(.opacity.combined(with: .scale(scale: 0.8)))
+    }
+}
+
+struct FolderAppItemView: View {
+    let app: AppItem
+    let iconSize: CGFloat
+    let onTap: () -> Void
+    let onRemove: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        VStack {
+            ZStack(alignment: .topLeading) {
+                Image(nsImage: app.icon)
+                    .resizable()
+                    .frame(width: iconSize, height: iconSize)
+                    .scaleEffect(isHovered ? 1.1 : 1.0)
+                    .animation(.easeOut(duration: 0.15), value: isHovered)
+
+                // Remove button on hover
+                if isHovered {
+                    Button(action: onRemove) {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(.white)
+                            .background(Circle().fill(Color.black.opacity(0.5)))
+                    }
+                    .buttonStyle(.plain)
+                    .offset(x: -5, y: -5)
+                }
+            }
+
+            Text(app.name)
+                .font(.caption)
+                .foregroundColor(.white)
+                .lineLimit(1)
+        }
+        .padding(4)
+        .onHover { hovering in
+            isHovered = hovering
+        }
+        .onTapGesture {
+            onTap()
         }
     }
 }

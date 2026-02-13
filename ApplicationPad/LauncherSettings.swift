@@ -52,7 +52,99 @@ struct LauncherSettings {
         columnsCount * rowsCount
     }
 
-    // Custom app order - stores app paths in user-defined order
+    // MARK: - Grid Items Storage (Apps + Folders)
+
+    private static let gridItemsKey = "gridItems"
+
+    // Codable wrapper for LauncherItem
+    private struct LauncherItemData: Codable {
+        let type: String // "app" or "folder"
+        let appData: AppItem?
+        let folderData: FolderItem?
+
+        init(from launcherItem: LauncherItem) {
+            switch launcherItem {
+            case .app(let app):
+                type = "app"
+                appData = app
+                folderData = nil
+            case .folder(let folder):
+                type = "folder"
+                appData = nil
+                folderData = folder
+            }
+        }
+
+        func toLauncherItem() -> LauncherItem? {
+            switch type {
+            case "app":
+                if let app = appData { return .app(app) }
+            case "folder":
+                if let folder = folderData { return .folder(folder) }
+            default:
+                break
+            }
+            return nil
+        }
+    }
+
+    static func saveGridItems(_ items: [LauncherItem]) {
+        let data = items.map { LauncherItemData(from: $0) }
+        if let encoded = try? JSONEncoder().encode(data) {
+            UserDefaults.standard.set(encoded, forKey: gridItemsKey)
+        }
+    }
+
+    static func loadGridItems() -> [LauncherItem]? {
+        guard let data = UserDefaults.standard.data(forKey: gridItemsKey),
+              let decoded = try? JSONDecoder().decode([LauncherItemData].self, from: data) else {
+            return nil
+        }
+        return decoded.compactMap { $0.toLauncherItem() }
+    }
+
+    static func applyCustomOrder(to apps: [AppItem]) -> [LauncherItem] {
+        // Try to load saved grid items first
+        if let savedItems = loadGridItems() {
+            var result: [LauncherItem] = []
+            var remainingApps = apps
+
+            for savedItem in savedItems {
+                switch savedItem {
+                case .app(let savedApp):
+                    // Find matching app by URL
+                    if let index = remainingApps.firstIndex(where: { $0.url == savedApp.url }) {
+                        result.append(.app(remainingApps.remove(at: index)))
+                    }
+                case .folder(let folder):
+                    // Rebuild folder with current app instances
+                    var updatedApps: [AppItem] = []
+                    for folderApp in folder.apps {
+                        if let index = remainingApps.firstIndex(where: { $0.url == folderApp.url }) {
+                            updatedApps.append(remainingApps.remove(at: index))
+                        }
+                    }
+                    if !updatedApps.isEmpty {
+                        result.append(.folder(FolderItem(id: folder.id, name: folder.name, apps: updatedApps)))
+                    }
+                }
+            }
+
+            // Append any new apps not in saved order
+            remainingApps.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            for app in remainingApps {
+                result.append(.app(app))
+            }
+
+            return result
+        }
+
+        // No saved items, return apps sorted alphabetically
+        let sortedApps = apps.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        return sortedApps.map { .app($0) }
+    }
+
+    // Legacy support - keep old methods for compatibility
     static var customAppOrder: [String] {
         get { UserDefaults.standard.stringArray(forKey: "customAppOrder") ?? [] }
         set { UserDefaults.standard.set(newValue, forKey: "customAppOrder") }
@@ -60,30 +152,6 @@ struct LauncherSettings {
 
     static func saveAppOrder(_ apps: [AppItem]) {
         customAppOrder = apps.map { $0.url.path }
-    }
-
-    static func applyCustomOrder(to apps: [AppItem]) -> [AppItem] {
-        let order = customAppOrder
-        guard !order.isEmpty else {
-            // No custom order, sort alphabetically
-            return apps.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-        }
-
-        var result: [AppItem] = []
-        var remaining = apps
-
-        // First, add apps in saved order
-        for path in order {
-            if let index = remaining.firstIndex(where: { $0.url.path == path }) {
-                result.append(remaining.remove(at: index))
-            }
-        }
-
-        // Then append any new apps (not in saved order) at the end, sorted alphabetically
-        remaining.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-        result.append(contentsOf: remaining)
-
-        return result
     }
 }
 
