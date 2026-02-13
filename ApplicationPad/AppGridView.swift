@@ -156,7 +156,8 @@ struct AppGridView: View {
                                             .scaleEffect(isDragging ? 1.1 : (isMergeReadyTarget ? 1.15 : (isMergeHoveringTarget ? 0.9 : 1.0)))
                                             .zIndex(isDragging ? 100 : 0)
                                             .opacity(isDragging ? 0.9 : 1.0)
-                                            .animation(.easeInOut(duration: 0.2), value: globalIndex)
+                                            // Only animate position for non-dragging items to avoid flicker
+                                            .animation(isDragging ? nil : .easeInOut(duration: 0.2), value: globalIndex)
                                             .animation(.spring(response: 0.25, dampingFraction: 0.7), value: isMergeHoveringTarget)
                                             .animation(.spring(response: 0.2, dampingFraction: 0.6), value: isMergeReadyTarget)
                                             .position(x: displayX, y: displayY)  // position 放最后，避免坐标系偏移
@@ -439,6 +440,16 @@ struct AppGridView: View {
                 width: dragAccumulatedOffset.width - deltaX,
                 height: dragAccumulatedOffset.height - deltaY
             )
+
+            // CRITICAL: Update draggingOffset immediately to prevent flicker
+            // displayX/Y = dragStartPosition + draggingOffset
+            // After updating dragStartPosition, we must also update draggingOffset in the same frame
+            // to maintain the same visual position
+            draggingOffset = CGSize(
+                width: draggingOffset.width - deltaX,
+                height: draggingOffset.height - deltaY
+            )
+
             dragStartPosition = newStartPosition
         }
 
