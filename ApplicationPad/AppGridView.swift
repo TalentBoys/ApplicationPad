@@ -48,6 +48,14 @@ struct AppGridView: View {
 
     var body: some View {
         GeometryReader { geometry in
+            let screenWidth = geometry.size.width
+            let screenHeight = geometry.size.height
+            let searchHeight: CGFloat = 60
+            let pageIndicatorHeight: CGFloat = totalPages > 1 ? 50 : 0
+            let availableHeight = screenHeight - searchHeight - pageIndicatorHeight
+            let cellWidth = screenWidth / CGFloat(columnsCount)
+            let cellHeight = availableHeight / CGFloat(rowsCount)
+
             ZStack {
                 // Background tap to close
                 Color.clear
@@ -61,26 +69,32 @@ struct AppGridView: View {
                     TextField("Search applications", text: $searchText)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 300)
-                        .padding(.vertical, 20)
+                        .frame(height: searchHeight)
                         .focused($isSearchFocused)
                         .onChange(of: searchText) { _, _ in
                             currentPage = 0
                         }
-                        .onTapGesture { } // Prevent closing when tapping search
+                        .onTapGesture { }
 
-                    // Paged grid with swipe gesture
+                    // Paged grid
                     GeometryReader { geo in
                         HStack(spacing: 0) {
                             ForEach(0..<totalPages, id: \.self) { page in
-                                LazyVGrid(columns: columns, spacing: 20) {
-                                    ForEach(appsForPage(page)) { app in
+                                let pageApps = appsForPage(page)
+                                ZStack {
+                                    ForEach(Array(pageApps.enumerated()), id: \.element.id) { index, app in
+                                        let row = index / columnsCount
+                                        let col = index % columnsCount
+                                        let x = cellWidth * (CGFloat(col) + 0.5)
+                                        let y = cellHeight * (CGFloat(row) + 0.5)
+
                                         AppItemView(app: app, iconSize: iconSize) {
                                             apps = AppScanner.scan()
                                         }
+                                        .position(x: x, y: y)
                                     }
                                 }
-                                .frame(width: geo.size.width)
-                                .padding(.horizontal, 60)
+                                .frame(width: geo.size.width, height: geo.size.height)
                             }
                         }
                         .offset(x: -CGFloat(currentPage) * geo.size.width)
@@ -97,7 +111,7 @@ struct AppGridView: View {
                                 }
                         )
                     }
-                    .frame(maxHeight: .infinity)
+                    .frame(height: availableHeight)
 
                     // Page indicator
                     if totalPages > 1 {
@@ -113,7 +127,7 @@ struct AppGridView: View {
                                     }
                             }
                         }
-                        .padding(.bottom, 30)
+                        .frame(height: pageIndicatorHeight)
                     }
                 }
             }
