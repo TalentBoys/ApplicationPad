@@ -8,7 +8,7 @@
 import Foundation
 import AppKit
 
-struct AppItem: Identifiable {
+struct AppItem: Identifiable, Equatable {
     let id = UUID()
     let name: String
     let url: URL
@@ -22,6 +22,10 @@ struct AppItem: Identifiable {
 
     func markUsed() {
         UserDefaults.standard.set(Date(), forKey: url.path)
+    }
+
+    static func == (lhs: AppItem, rhs: AppItem) -> Bool {
+        lhs.url == rhs.url
     }
 }
 

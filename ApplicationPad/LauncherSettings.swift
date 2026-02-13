@@ -51,6 +51,40 @@ struct LauncherSettings {
     static var appsPerPage: Int {
         columnsCount * rowsCount
     }
+
+    // Custom app order - stores app paths in user-defined order
+    static var customAppOrder: [String] {
+        get { UserDefaults.standard.stringArray(forKey: "customAppOrder") ?? [] }
+        set { UserDefaults.standard.set(newValue, forKey: "customAppOrder") }
+    }
+
+    static func saveAppOrder(_ apps: [AppItem]) {
+        customAppOrder = apps.map { $0.url.path }
+    }
+
+    static func applyCustomOrder(to apps: [AppItem]) -> [AppItem] {
+        let order = customAppOrder
+        guard !order.isEmpty else {
+            // No custom order, sort alphabetically
+            return apps.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        }
+
+        var result: [AppItem] = []
+        var remaining = apps
+
+        // First, add apps in saved order
+        for path in order {
+            if let index = remaining.firstIndex(where: { $0.url.path == path }) {
+                result.append(remaining.remove(at: index))
+            }
+        }
+
+        // Then append any new apps (not in saved order) at the end, sorted alphabetically
+        remaining.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        result.append(contentsOf: remaining)
+
+        return result
+    }
 }
 
 extension Double {

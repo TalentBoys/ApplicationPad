@@ -10,6 +10,7 @@ import SwiftUI
 struct AppGridView: View {
     @State private var searchText = ""
     @State private var apps = AppScanner.scan()
+    @State private var orderedApps: [AppItem] = []  // Display order, updated during drag
     @State private var keyMonitor = KeyEventMonitor()
     @State private var currentPage = 0
     @State private var dragOffset: CGFloat = 0
@@ -17,6 +18,12 @@ struct AppGridView: View {
     @State private var pageWidth: CGFloat = 0
     @State private var scrollEndTimer: Timer?
     @FocusState private var isSearchFocused: Bool
+
+    // Drag-to-reorder state
+    @State private var draggingApp: AppItem?
+    @State private var draggingOffset: CGSize = .zero
+    @State private var dragCurrentIndex: Int?
+    @State private var dragStartPosition: CGPoint = .zero  // Initial position when drag started
 
     var columnsCount: Int { LauncherSettings.columnsCount }
     var rowsCount: Int { LauncherSettings.rowsCount }
@@ -29,13 +36,17 @@ struct AppGridView: View {
     var filteredApps: [AppItem] {
         let key = searchText.lowercased()
         if key.isEmpty {
-            return apps.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            return orderedApps.isEmpty ? LauncherSettings.applyCustomOrder(to: apps) : orderedApps
         }
         return apps.filter {
             $0.name.localizedCaseInsensitiveContains(key)
             || $0.pinyinName.contains(key)
             || $0.pinyinInitials.contains(key)
         }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    private func refreshOrderedApps() {
+        orderedApps = LauncherSettings.applyCustomOrder(to: apps)
     }
 
     var totalPages: Int {
@@ -89,42 +100,96 @@ struct AppGridView: View {
 
                     // Paged grid
                     GeometryReader { geo in
-                        HStack(spacing: 0) {
-                            ForEach(0..<totalPages, id: \.self) { page in
-                                let pageApps = appsForPage(page)
-                                ZStack {
-                                    ForEach(Array(pageApps.enumerated()), id: \.element.id) { index, app in
-                                        let row = index / columnsCount
-                                        let col = index % columnsCount
-                                        let x = horizontalPadding + cellWidth * (CGFloat(col) + 0.5)
-                                        let y = topPadding + cellHeight * (CGFloat(row) + 0.5)
+                        let cellWidth = (geo.size.width - horizontalPadding * 2) / CGFloat(columnsCount)
+                        let cellHeight = (geo.size.height - topPadding - bottomPadding) / CGFloat(rowsCount)
 
-                                        AppItemView(app: app, iconSize: iconSize) {
-                                            apps = AppScanner.scan()
+                        ZStack {
+                            HStack(spacing: 0) {
+                                ForEach(0..<totalPages, id: \.self) { page in
+                                    let pageApps = appsForPage(page)
+                                    ZStack {
+                                        ForEach(Array(pageApps.enumerated()), id: \.element.url) { index, app in
+                                            let globalIndex = page * appsPerPage + index
+                                            let row = index / columnsCount
+                                            let col = index % columnsCount
+                                            let x = horizontalPadding + cellWidth * (CGFloat(col) + 0.5)
+                                            let y = topPadding + cellHeight * (CGFloat(row) + 0.5)
+                                            let isDragging = draggingApp?.url == app.url
+
+                                            // For dragging item: use start position + offset
+                                            // For other items: use grid position with animation
+                                            let displayX = isDragging ? dragStartPosition.x : x
+                                            let displayY = isDragging ? dragStartPosition.y : y
+
+                                            AppItemView(app: app, iconSize: iconSize) {
+                                                apps = AppScanner.scan()
+                                                refreshOrderedApps()
+                                            }
+                                            .position(x: displayX, y: displayY)
+                                            .offset(isDragging ? draggingOffset : .zero)
+                                            .scaleEffect(isDragging ? 1.1 : 1.0)
+                                            .zIndex(isDragging ? 100 : 0)
+                                            .opacity(isDragging ? 0.9 : 1.0)
+                                            .animation(isDragging ? nil : .easeInOut(duration: 0.2), value: orderedApps.map { $0.url })
+                                            .onLongPressGesture(minimumDuration: 0.3) {
+                                                // Long press completed - start drag mode
+                                                if searchText.isEmpty {
+                                                    draggingApp = app
+                                                    dragCurrentIndex = globalIndex
+                                                    dragStartPosition = CGPoint(x: x, y: y)
+                                                }
+                                            }
+                                            .simultaneousGesture(
+                                                DragGesture(minimumDistance: 0)
+                                                    .onChanged { drag in
+                                                        if draggingApp?.url == app.url {
+                                                            draggingOffset = drag.translation
+
+                                                            // Calculate target position based on start position
+                                                            let dragX = dragStartPosition.x + drag.translation.width
+                                                            let dragY = dragStartPosition.y + drag.translation.height
+
+                                                            updateDragPosition(
+                                                                dragX: dragX,
+                                                                dragY: dragY,
+                                                                cellWidth: cellWidth,
+                                                                cellHeight: cellHeight
+                                                            )
+                                                        }
+                                                    }
+                                                    .onEnded { _ in
+                                                        if draggingApp?.url == app.url {
+                                                            finishDragging()
+                                                        }
+                                                    }
+                                            )
                                         }
-                                        .position(x: x, y: y)
                                     }
+                                    .frame(width: geo.size.width, height: geo.size.height)
                                 }
-                                .frame(width: geo.size.width, height: geo.size.height)
                             }
+                            .offset(x: -CGFloat(currentPage) * geo.size.width + dragOffset)
+                            .animation(.easeInOut(duration: 0.3), value: currentPage)
                         }
-                        .offset(x: -CGFloat(currentPage) * geo.size.width + dragOffset)
-                        .animation(.easeInOut(duration: 0.3), value: currentPage)
                         .gesture(
                             DragGesture(minimumDistance: 20)
                                 .onChanged { value in
-                                    dragOffset = value.translation.width
+                                    if draggingApp == nil {
+                                        dragOffset = value.translation.width
+                                    }
                                 }
                                 .onEnded { value in
-                                    let threshold = geo.size.width * 0.3
+                                    if draggingApp == nil {
+                                        let threshold = geo.size.width * 0.3
 
-                                    withAnimation(.easeInOut(duration: 0.3)) {
-                                        if value.translation.width < -threshold && currentPage < totalPages - 1 {
-                                            currentPage += 1
-                                        } else if value.translation.width > threshold && currentPage > 0 {
-                                            currentPage -= 1
+                                        withAnimation(.easeInOut(duration: 0.3)) {
+                                            if value.translation.width < -threshold && currentPage < totalPages - 1 {
+                                                currentPage += 1
+                                            } else if value.translation.width > threshold && currentPage > 0 {
+                                                currentPage -= 1
+                                            }
+                                            dragOffset = 0
                                         }
-                                        dragOffset = 0
                                     }
                                 }
                         )
@@ -163,6 +228,7 @@ struct AppGridView: View {
             }
         }
         .onAppear {
+            refreshOrderedApps()
             focusSearchField()
             keyMonitor.startEscListener {
                 closeLauncher()
@@ -188,6 +254,44 @@ struct AppGridView: View {
         LauncherPanel.shared.close()
         searchText = ""
         currentPage = 0
+    }
+
+    private func updateDragPosition(dragX: CGFloat, dragY: CGFloat, cellWidth: CGFloat, cellHeight: CGFloat) {
+        guard let currentIndex = dragCurrentIndex, draggingApp != nil else { return }
+
+        // Calculate target cell
+        let col = Int((dragX - horizontalPadding) / cellWidth)
+        let row = Int((dragY - topPadding) / cellHeight)
+
+        // Validate bounds
+        guard col >= 0, col < columnsCount, row >= 0, row < rowsCount else { return }
+
+        let targetIndexInPage = row * columnsCount + col
+        let targetIndex = currentPage * appsPerPage + targetIndexInPage
+
+        // Validate target index and check if changed
+        guard targetIndex >= 0, targetIndex < orderedApps.count, targetIndex != currentIndex else { return }
+
+        // Move the app in the array
+        withAnimation(.easeInOut(duration: 0.15)) {
+            let app = orderedApps.remove(at: currentIndex)
+            orderedApps.insert(app, at: targetIndex)
+            dragCurrentIndex = targetIndex
+        }
+    }
+
+    private func finishDragging() {
+        // Save the final order
+        if !orderedApps.isEmpty {
+            LauncherSettings.saveAppOrder(orderedApps)
+        }
+
+        withAnimation(.easeOut(duration: 0.2)) {
+            draggingApp = nil
+            draggingOffset = .zero
+            dragCurrentIndex = nil
+            dragStartPosition = .zero
+        }
     }
 
     private func startScrollMonitor() {
