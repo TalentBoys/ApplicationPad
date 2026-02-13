@@ -24,6 +24,7 @@ struct AppGridView: View {
     @State private var draggingOffset: CGSize = .zero
     @State private var dragCurrentIndex: Int?
     @State private var dragStartPosition: CGPoint = .zero  // Initial position when drag started
+    @State private var isDraggingPage: Bool = false  // Track if we're dragging the page
 
     var columnsCount: Int { LauncherSettings.columnsCount }
     var rowsCount: Int { LauncherSettings.rowsCount }
@@ -77,13 +78,6 @@ struct AppGridView: View {
             let cellHeight = availableHeight / CGFloat(rowsCount)
 
             ZStack {
-                // Background tap to close
-                Color.clear
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        closeLauncher()
-                    }
-
                 VStack(spacing: 0) {
                     Spacer()
                         .frame(height: notchHeight)
@@ -131,17 +125,16 @@ struct AppGridView: View {
                                             .zIndex(isDragging ? 100 : 0)
                                             .opacity(isDragging ? 0.9 : 1.0)
                                             .animation(isDragging ? nil : .easeInOut(duration: 0.2), value: orderedApps.map { $0.url })
-                                            .onLongPressGesture(minimumDuration: 0.3) {
-                                                // Long press completed - start drag mode
-                                                if searchText.isEmpty {
-                                                    draggingApp = app
-                                                    dragCurrentIndex = globalIndex
-                                                    dragStartPosition = CGPoint(x: x, y: y)
-                                                }
-                                            }
-                                            .simultaneousGesture(
-                                                DragGesture(minimumDistance: 0)
+                                            .highPriorityGesture(
+                                                DragGesture(minimumDistance: 15)
                                                     .onChanged { drag in
+                                                        // Start dragging on first trigger (distance exceeded)
+                                                        if draggingApp == nil && searchText.isEmpty {
+                                                            draggingApp = app
+                                                            dragCurrentIndex = globalIndex
+                                                            dragStartPosition = CGPoint(x: x, y: y)
+                                                        }
+
                                                         if draggingApp?.url == app.url {
                                                             draggingOffset = drag.translation
 
@@ -171,16 +164,37 @@ struct AppGridView: View {
                             .offset(x: -CGFloat(currentPage) * geo.size.width + dragOffset)
                             .animation(.easeInOut(duration: 0.3), value: currentPage)
                         }
+                        .contentShape(Rectangle())  // Make entire area respond to gestures
+                        .onTapGesture {
+                            // Tap on empty area to close
+                            print("[TAP] Grid area tapped, isDraggingPage=\(isDraggingPage), draggingApp=\(draggingApp?.name ?? "nil")")
+                            if !isDraggingPage && draggingApp == nil {
+                                print("[TAP] Closing launcher")
+                                closeLauncher()
+                            }
+                        }
                         .gesture(
-                            DragGesture(minimumDistance: 20)
+                            DragGesture(minimumDistance: 15)
                                 .onChanged { value in
+                                    print("[PAGE_DRAG] onChanged, draggingApp=\(draggingApp?.name ?? "nil")")
+                                    // Only handle page swipe if not dragging an app
                                     if draggingApp == nil {
+                                        isDraggingPage = true
+                                        print("[PAGE_DRAG] Set isDraggingPage=true")
                                         dragOffset = value.translation.width
+
+                                        // Apply boundary resistance
+                                        if currentPage == 0 && dragOffset > 0 {
+                                            dragOffset = min(dragOffset, 100)
+                                        } else if currentPage == totalPages - 1 && dragOffset < 0 {
+                                            dragOffset = max(dragOffset, -100)
+                                        }
                                     }
                                 }
                                 .onEnded { value in
+                                    print("[PAGE_DRAG] onEnded, isDraggingPage=\(isDraggingPage)")
                                     if draggingApp == nil {
-                                        let threshold = geo.size.width * 0.3
+                                        let threshold = geo.size.width * 0.2
 
                                         withAnimation(.easeInOut(duration: 0.3)) {
                                             if value.translation.width < -threshold && currentPage < totalPages - 1 {
@@ -191,6 +205,8 @@ struct AppGridView: View {
                                             dragOffset = 0
                                         }
                                     }
+                                    isDraggingPage = false
+                                    print("[PAGE_DRAG] Reset isDraggingPage=false")
                                 }
                         )
                         .onAppear {
