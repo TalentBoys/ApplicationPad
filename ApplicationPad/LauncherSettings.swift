@@ -8,24 +8,23 @@
 import Foundation
 
 struct LauncherSettings {
-    static var windowWidth: CGFloat {
-        get { CGFloat(UserDefaults.standard.double(forKey: "launcherWidth").nonZero ?? 1400) }
-        set { UserDefaults.standard.set(Double(newValue), forKey: "launcherWidth") }
-    }
-
-    static var windowHeight: CGFloat {
-        get { CGFloat(UserDefaults.standard.double(forKey: "launcherHeight").nonZero ?? 900) }
-        set { UserDefaults.standard.set(Double(newValue), forKey: "launcherHeight") }
-    }
-
     static var iconSize: CGFloat {
         get { CGFloat(UserDefaults.standard.double(forKey: "iconSize").nonZero ?? 96) }
         set { UserDefaults.standard.set(Double(newValue), forKey: "iconSize") }
     }
 
     static var columnsCount: Int {
-        get { UserDefaults.standard.integer(forKey: "columnsCount").nonZero ?? 6 }
+        get { UserDefaults.standard.integer(forKey: "columnsCount").nonZero ?? 8 }
         set { UserDefaults.standard.set(newValue, forKey: "columnsCount") }
+    }
+
+    static var rowsCount: Int {
+        get { UserDefaults.standard.integer(forKey: "rowsCount").nonZero ?? 5 }
+        set { UserDefaults.standard.set(newValue, forKey: "rowsCount") }
+    }
+
+    static var appsPerPage: Int {
+        columnsCount * rowsCount
     }
 }
 

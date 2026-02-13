@@ -12,34 +12,20 @@ class LauncherPanel: NSPanel {
     static let shared = LauncherPanel()
 
     private init() {
-        let width = LauncherSettings.windowWidth
-        let height = LauncherSettings.windowHeight
-
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: width, height: height),
+            contentRect: NSScreen.main?.frame ?? .zero,
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
 
-        self.level = .floating
+        self.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()))
         self.backgroundColor = .clear
         self.isOpaque = false
-        self.hasShadow = true
-        self.isMovableByWindowBackground = true
+        self.hasShadow = false
         self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        self.hidesOnDeactivate = true
 
         updateContent()
-        center()
-    }
-
-    func updateSize() {
-        let width = LauncherSettings.windowWidth
-        let height = LauncherSettings.windowHeight
-        setContentSize(NSSize(width: width, height: height))
-        updateContent()
-        center()
     }
 
     private func updateContent() {
@@ -56,14 +42,12 @@ class LauncherPanel: NSPanel {
     }
 
     func show() {
-        updateSize()
+        if let screen = NSScreen.main {
+            setFrame(screen.frame, display: true)
+        }
+        updateContent()
         NSApp.activate(ignoringOtherApps: true)
         makeKeyAndOrderFront(nil)
-    }
-
-    override func resignKey() {
-        super.resignKey()
-        close()
     }
 
     override func close() {
@@ -76,11 +60,7 @@ class LauncherPanel: NSPanel {
 struct LauncherContentView: View {
     var body: some View {
         AppGridView()
-            .frame(
-                width: LauncherSettings.windowWidth,
-                height: LauncherSettings.windowHeight
-            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(VisualEffectView())
-            .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 }

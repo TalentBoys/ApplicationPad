@@ -11,113 +11,111 @@ struct AppGridView: View {
     @State private var searchText = ""
     @State private var apps = AppScanner.scan()
     @State private var keyMonitor = KeyEventMonitor()
+    @State private var currentPage = 0
     @FocusState private var isSearchFocused: Bool
 
-    var columns: [GridItem] {
-        let count = LauncherSettings.columnsCount
-        return Array(repeating: GridItem(.flexible(), spacing: 20), count: count)
-    }
-
-    var iconSize: CGFloat {
-        LauncherSettings.iconSize
-    }
-
-    var recentApps: [AppItem] {
-        let key = searchText.lowercased()
-        let recent = apps.filter { $0.lastUsed != .distantPast }
-            .sorted { $0.lastUsed > $1.lastUsed }
-            .prefix(LauncherSettings.columnsCount)
-
-        if key.isEmpty {
-            return Array(recent)
-        }
-        return recent.filter {
-            $0.name.localizedCaseInsensitiveContains(key)
-            || $0.pinyinName.contains(key)
-            || $0.pinyinInitials.contains(key)
-        }
-    }
-
-    var otherApps: [AppItem] {
-        let key = searchText.lowercased()
-        let recentIDs = Set(recentApps.map { $0.id })
-        let others = apps.filter { !recentIDs.contains($0.id) }
-            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-
-        if key.isEmpty {
-            return others
-        }
-        return others.filter {
-            $0.name.localizedCaseInsensitiveContains(key)
-            || $0.pinyinName.contains(key)
-            || $0.pinyinInitials.contains(key)
-        }
-    }
+    var columnsCount: Int { LauncherSettings.columnsCount }
+    var rowsCount: Int { LauncherSettings.rowsCount }
+    var appsPerPage: Int { LauncherSettings.appsPerPage }
+    var iconSize: CGFloat { LauncherSettings.iconSize }
 
     var filteredApps: [AppItem] {
         let key = searchText.lowercased()
         if key.isEmpty {
-            return apps
+            return apps.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         }
         return apps.filter {
             $0.name.localizedCaseInsensitiveContains(key)
             || $0.pinyinName.contains(key)
             || $0.pinyinInitials.contains(key)
-        }
+        }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    var totalPages: Int {
+        max(1, Int(ceil(Double(filteredApps.count) / Double(appsPerPage))))
+    }
+
+    var columns: [GridItem] {
+        Array(repeating: GridItem(.flexible(), spacing: 20), count: columnsCount)
+    }
+
+    func appsForPage(_ page: Int) -> [AppItem] {
+        let start = page * appsPerPage
+        let end = min(start + appsPerPage, filteredApps.count)
+        guard start < filteredApps.count else { return [] }
+        return Array(filteredApps[start..<end])
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Search box
-            TextField("Search applications", text: $searchText)
-                .textFieldStyle(.roundedBorder)
-                .padding(.horizontal, 20)
-                .padding(.vertical, 12)
-                .focused($isSearchFocused)
+        GeometryReader { geometry in
+            ZStack {
+                // Background tap to close
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        closeLauncher()
+                    }
 
-            ScrollView {
-                VStack(spacing: 16) {
-                    // Recent apps section
-                    if !recentApps.isEmpty {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Recent")
-                                .font(.headline)
-                                .foregroundColor(.secondary)
-                                .padding(.horizontal, 4)
+                VStack(spacing: 0) {
+                    // Search box
+                    TextField("Search applications", text: $searchText)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 300)
+                        .padding(.vertical, 20)
+                        .focused($isSearchFocused)
+                        .onChange(of: searchText) { _, _ in
+                            currentPage = 0
+                        }
+                        .onTapGesture { } // Prevent closing when tapping search
 
-                            LazyVGrid(columns: columns, spacing: 20) {
-                                ForEach(recentApps) { app in
-                                    AppItemView(app: app, iconSize: iconSize) {
-                                        apps = AppScanner.scan()
+                    // Paged grid with swipe gesture
+                    GeometryReader { geo in
+                        HStack(spacing: 0) {
+                            ForEach(0..<totalPages, id: \.self) { page in
+                                LazyVGrid(columns: columns, spacing: 20) {
+                                    ForEach(appsForPage(page)) { app in
+                                        AppItemView(app: app, iconSize: iconSize) {
+                                            apps = AppScanner.scan()
+                                        }
                                     }
                                 }
+                                .frame(width: geo.size.width)
+                                .padding(.horizontal, 60)
                             }
                         }
-
-                        Divider()
-                            .padding(.vertical, 8)
-                    }
-
-                    // All other apps
-                    VStack(alignment: .leading, spacing: 12) {
-                        if !recentApps.isEmpty {
-                            Text("All Apps")
-                                .font(.headline)
-                                .foregroundColor(.secondary)
-                                .padding(.horizontal, 4)
-                        }
-
-                        LazyVGrid(columns: columns, spacing: 20) {
-                            ForEach(otherApps) { app in
-                                AppItemView(app: app, iconSize: iconSize) {
-                                    apps = AppScanner.scan()
+                        .offset(x: -CGFloat(currentPage) * geo.size.width)
+                        .animation(.easeInOut(duration: 0.3), value: currentPage)
+                        .gesture(
+                            DragGesture()
+                                .onEnded { value in
+                                    let threshold: CGFloat = 50
+                                    if value.translation.width < -threshold && currentPage < totalPages - 1 {
+                                        currentPage += 1
+                                    } else if value.translation.width > threshold && currentPage > 0 {
+                                        currentPage -= 1
+                                    }
                                 }
+                        )
+                    }
+                    .frame(maxHeight: .infinity)
+
+                    // Page indicator
+                    if totalPages > 1 {
+                        HStack(spacing: 8) {
+                            ForEach(0..<totalPages, id: \.self) { page in
+                                Circle()
+                                    .fill(page == currentPage ? Color.white : Color.white.opacity(0.4))
+                                    .frame(width: 8, height: 8)
+                                    .onTapGesture {
+                                        withAnimation {
+                                            currentPage = page
+                                        }
+                                    }
                             }
                         }
+                        .padding(.bottom, 30)
                     }
                 }
-                .padding(20)
-                .animation(.interactiveSpring(), value: filteredApps.map { $0.id })
             }
         }
         .onAppear {
@@ -129,6 +127,7 @@ struct AppGridView: View {
         .onDisappear {
             keyMonitor.stop()
             searchText = ""
+            currentPage = 0
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
             focusSearchField()
@@ -144,6 +143,7 @@ struct AppGridView: View {
     private func closeLauncher() {
         LauncherPanel.shared.close()
         searchText = ""
+        currentPage = 0
     }
 }
 
@@ -164,10 +164,11 @@ struct AppItemView: View {
 
             Text(app.name)
                 .font(iconSize > 64 ? .callout : .caption)
+                .foregroundColor(.white)
                 .lineLimit(1)
         }
         .padding(8)
-        .background(isHovered ? Color.gray.opacity(0.2) : Color.clear)
+        .background(isHovered ? Color.white.opacity(0.2) : Color.clear)
         .cornerRadius(8)
         .onHover { hovering in
             isHovered = hovering

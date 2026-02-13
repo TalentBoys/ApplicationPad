@@ -11,10 +11,9 @@ import Carbon
 struct SettingsView: View {
     @AppStorage("hotkeyModifiers") private var hotkeyModifiers: Int = cmdKey | shiftKey
     @AppStorage("hotkeyKeyCode") private var hotkeyKeyCode: Int = kVK_Space
-    @AppStorage("launcherWidth") private var launcherWidth: Double = 1400
-    @AppStorage("launcherHeight") private var launcherHeight: Double = 900
     @AppStorage("iconSize") private var iconSize: Double = 96
-    @AppStorage("columnsCount") private var columnsCount: Int = 6
+    @AppStorage("columnsCount") private var columnsCount: Int = 8
+    @AppStorage("rowsCount") private var rowsCount: Int = 5
 
     @State private var isRecordingHotkey = false
 
@@ -58,20 +57,6 @@ struct SettingsView: View {
 
             Section {
                 HStack {
-                    Text("Window Width")
-                    Slider(value: $launcherWidth, in: 600...2000, step: 50)
-                    Text("\(Int(launcherWidth))")
-                        .frame(width: 50)
-                }
-
-                HStack {
-                    Text("Window Height")
-                    Slider(value: $launcherHeight, in: 400...1400, step: 50)
-                    Text("\(Int(launcherHeight))")
-                        .frame(width: 50)
-                }
-
-                HStack {
                     Text("Icon Size")
                     Slider(value: $iconSize, in: 48...160, step: 8)
                     Text("\(Int(iconSize))")
@@ -82,27 +67,34 @@ struct SettingsView: View {
                     Text("Columns")
                     Spacer()
                     Picker("", selection: $columnsCount) {
-                        ForEach(4...10, id: \.self) { count in
+                        ForEach(4...12, id: \.self) { count in
                             Text("\(count)").tag(count)
                         }
                     }
                     .pickerStyle(.segmented)
-                    .frame(width: 280)
+                    .frame(width: 320)
+                }
+
+                HStack {
+                    Text("Rows")
+                    Spacer()
+                    Picker("", selection: $rowsCount) {
+                        ForEach(3...8, id: \.self) { count in
+                            Text("\(count)").tag(count)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 240)
                 }
 
                 Button("Reset to Default") {
-                    launcherWidth = 1400
-                    launcherHeight = 900
                     iconSize = 96
-                    columnsCount = 6
-                    LauncherPanel.shared.updateSize()
+                    columnsCount = 8
+                    rowsCount = 5
                 }
                 .font(.caption)
             } header: {
                 Text("Appearance")
-            } footer: {
-                Text("Changes apply next time you open the launcher")
-                    .foregroundColor(.secondary)
             }
 
             Section {
@@ -114,9 +106,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 550, height: 550)
-        .onChange(of: launcherWidth) { _, _ in LauncherPanel.shared.updateSize() }
-        .onChange(of: launcherHeight) { _, _ in LauncherPanel.shared.updateSize() }
+        .frame(width: 550, height: 400)
     }
 }
 
