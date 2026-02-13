@@ -9,12 +9,12 @@ import Foundation
 
 struct LauncherSettings {
     static var iconSize: CGFloat {
-        get { CGFloat(UserDefaults.standard.double(forKey: "iconSize").nonZero ?? 96) }
+        get { CGFloat(UserDefaults.standard.double(forKey: "iconSize").nonZero ?? 112) }
         set { UserDefaults.standard.set(Double(newValue), forKey: "iconSize") }
     }
 
     static var columnsCount: Int {
-        get { UserDefaults.standard.integer(forKey: "columnsCount").nonZero ?? 8 }
+        get { UserDefaults.standard.integer(forKey: "columnsCount").nonZero ?? 6 }
         set { UserDefaults.standard.set(newValue, forKey: "columnsCount") }
     }
 
@@ -29,13 +29,23 @@ struct LauncherSettings {
     }
 
     static var topPadding: CGFloat {
-        get { CGFloat(UserDefaults.standard.object(forKey: "topPadding") as? Double ?? 20) }
+        get { CGFloat(UserDefaults.standard.object(forKey: "topPadding") as? Double ?? 30) }
         set { UserDefaults.standard.set(Double(newValue), forKey: "topPadding") }
     }
 
     static var bottomPadding: CGFloat {
-        get { CGFloat(UserDefaults.standard.object(forKey: "bottomPadding") as? Double ?? 40) }
+        get { CGFloat(UserDefaults.standard.object(forKey: "bottomPadding") as? Double ?? 70) }
         set { UserDefaults.standard.set(Double(newValue), forKey: "bottomPadding") }
+    }
+
+    static var invertScroll: Bool {
+        get { UserDefaults.standard.bool(forKey: "invertScroll") }
+        set { UserDefaults.standard.set(newValue, forKey: "invertScroll") }
+    }
+
+    static var scrollSensitivity: CGFloat {
+        get { CGFloat(UserDefaults.standard.object(forKey: "scrollSensitivity") as? Double ?? 1.0) }
+        set { UserDefaults.standard.set(Double(newValue), forKey: "scrollSensitivity") }
     }
 
     static var appsPerPage: Int {

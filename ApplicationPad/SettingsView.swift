@@ -11,12 +11,14 @@ import Carbon
 struct SettingsView: View {
     @AppStorage("hotkeyModifiers") private var hotkeyModifiers: Int = cmdKey | shiftKey
     @AppStorage("hotkeyKeyCode") private var hotkeyKeyCode: Int = kVK_Space
-    @AppStorage("iconSize") private var iconSize: Double = 96
-    @AppStorage("columnsCount") private var columnsCount: Int = 8
+    @AppStorage("iconSize") private var iconSize: Double = 112
+    @AppStorage("columnsCount") private var columnsCount: Int = 6
     @AppStorage("rowsCount") private var rowsCount: Int = 5
     @AppStorage("horizontalPadding") private var horizontalPadding: Double = 120
-    @AppStorage("topPadding") private var topPadding: Double = 20
-    @AppStorage("bottomPadding") private var bottomPadding: Double = 40
+    @AppStorage("topPadding") private var topPadding: Double = 30
+    @AppStorage("bottomPadding") private var bottomPadding: Double = 70
+    @AppStorage("invertScroll") private var invertScroll: Bool = false
+    @AppStorage("scrollSensitivity") private var scrollSensitivity: Double = 1.0
 
     @State private var isRecordingHotkey = false
 
@@ -111,13 +113,24 @@ struct SettingsView: View {
                         .frame(width: 50)
                 }
 
+                Toggle("Invert Scroll Direction", isOn: $invertScroll)
+
+                HStack {
+                    Text("Scroll Sensitivity")
+                    Slider(value: $scrollSensitivity, in: 0.5...3.0, step: 0.1)
+                    Text(String(format: "%.1f", scrollSensitivity))
+                        .frame(width: 50)
+                }
+
                 Button("Reset to Default") {
-                    iconSize = 96
-                    columnsCount = 8
+                    iconSize = 112
+                    columnsCount = 6
                     rowsCount = 5
                     horizontalPadding = 120
-                    topPadding = 20
-                    bottomPadding = 40
+                    topPadding = 30
+                    bottomPadding = 70
+                    invertScroll = false
+                    scrollSensitivity = 1.0
                 }
                 .font(.caption)
             } header: {
@@ -133,7 +146,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 550, height: 520)
+        .frame(width: 550, height: 580)
     }
 }
 

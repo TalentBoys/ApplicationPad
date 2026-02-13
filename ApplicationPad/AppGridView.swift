@@ -12,6 +12,10 @@ struct AppGridView: View {
     @State private var apps = AppScanner.scan()
     @State private var keyMonitor = KeyEventMonitor()
     @State private var currentPage = 0
+    @State private var dragOffset: CGFloat = 0
+    @State private var scrollMonitor: Any?
+    @State private var pageWidth: CGFloat = 0
+    @State private var scrollEndTimer: Timer?
     @FocusState private var isSearchFocused: Bool
 
     var columnsCount: Int { LauncherSettings.columnsCount }
@@ -104,21 +108,40 @@ struct AppGridView: View {
                                 .frame(width: geo.size.width, height: geo.size.height)
                             }
                         }
-                        .offset(x: -CGFloat(currentPage) * geo.size.width)
+                        .offset(x: -CGFloat(currentPage) * geo.size.width + dragOffset)
                         .animation(.easeInOut(duration: 0.3), value: currentPage)
                         .gesture(
-                            DragGesture()
+                            DragGesture(minimumDistance: 20)
+                                .onChanged { value in
+                                    dragOffset = value.translation.width
+                                }
                                 .onEnded { value in
-                                    let threshold: CGFloat = 50
-                                    if value.translation.width < -threshold && currentPage < totalPages - 1 {
-                                        currentPage += 1
-                                    } else if value.translation.width > threshold && currentPage > 0 {
-                                        currentPage -= 1
+                                    let threshold = geo.size.width * 0.3
+
+                                    withAnimation(.easeInOut(duration: 0.3)) {
+                                        if value.translation.width < -threshold && currentPage < totalPages - 1 {
+                                            currentPage += 1
+                                        } else if value.translation.width > threshold && currentPage > 0 {
+                                            currentPage -= 1
+                                        }
+                                        dragOffset = 0
                                     }
                                 }
                         )
+                        .onAppear {
+                            pageWidth = geo.size.width
+                        }
+                        .onChange(of: geo.size.width) { _, newWidth in
+                            pageWidth = newWidth
+                        }
                     }
                     .frame(height: availableHeight + topPadding + bottomPadding)
+                    .onAppear {
+                        startScrollMonitor()
+                    }
+                    .onDisappear {
+                        stopScrollMonitor()
+                    }
 
                     // Page indicator
                     if totalPages > 1 {
@@ -165,6 +188,65 @@ struct AppGridView: View {
         LauncherPanel.shared.close()
         searchText = ""
         currentPage = 0
+    }
+
+    private func startScrollMonitor() {
+        scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
+            let invert: CGFloat = LauncherSettings.invertScroll ? -1 : 1
+            let sensitivity = LauncherSettings.scrollSensitivity
+
+            let deltaX = event.scrollingDeltaX * invert * sensitivity
+            let deltaY = event.scrollingDeltaY * invert * sensitivity
+
+            // Combine horizontal and vertical: left/up = previous page, right/down = next page
+            let delta = deltaX - deltaY
+
+            // Skip if no meaningful delta
+            guard abs(delta) > 0.1 else { return event }
+
+            // Update drag offset for visual feedback
+            dragOffset += delta
+
+            // Limit drag offset to one page width
+            let maxOffset = pageWidth > 0 ? pageWidth : 1000
+            dragOffset = max(-maxOffset, min(maxOffset, dragOffset))
+
+            // Clamp drag offset at boundaries with resistance
+            if currentPage == 0 && dragOffset > 0 {
+                dragOffset = min(dragOffset, 100)
+            } else if currentPage == totalPages - 1 && dragOffset < 0 {
+                dragOffset = max(dragOffset, -100)
+            }
+
+            // Reset timer for detecting scroll end
+            scrollEndTimer?.invalidate()
+            scrollEndTimer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: false) { _ in
+                DispatchQueue.main.async {
+                    let threshold = pageWidth * 0.15
+                    let currentDragOffset = dragOffset
+
+                    withAnimation(.easeOut(duration: 0.3)) {
+                        if currentDragOffset < -threshold && currentPage < totalPages - 1 {
+                            currentPage += 1
+                        } else if currentDragOffset > threshold && currentPage > 0 {
+                            currentPage -= 1
+                        }
+                        dragOffset = 0
+                    }
+                }
+            }
+
+            return event
+        }
+    }
+
+    private func stopScrollMonitor() {
+        if let monitor = scrollMonitor {
+            NSEvent.removeMonitor(monitor)
+            scrollMonitor = nil
+        }
+        scrollEndTimer?.invalidate()
+        scrollEndTimer = nil
     }
 }
 
