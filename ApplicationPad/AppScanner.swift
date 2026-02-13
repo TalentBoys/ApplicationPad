@@ -138,7 +138,7 @@ struct FolderItem: Identifiable, Equatable, Codable {
     }
 
     static func == (lhs: FolderItem, rhs: FolderItem) -> Bool {
-        lhs.id == rhs.id
+        lhs.id == rhs.id && lhs.apps.count == rhs.apps.count && lhs.apps.map { $0.id } == rhs.apps.map { $0.id }
     }
 }
 

@@ -196,6 +196,11 @@ struct AppGridView: View {
                                             let isMergeTarget = mergeTargetId == item.id
                                             let isMergeHoveringTarget = isMergeHovering && isMergeTarget
                                             let isMergeReadyTarget = isMergeReady && isMergeTarget
+                                            // Check if merge target is a folder (folders should scale up, not show gray background)
+                                            let isTargetFolder: Bool = {
+                                                if case .folder = item { return true }
+                                                return false
+                                            }()
 
                                             let displayX = isDragging ? dragStartPosition.x + draggingOffset.width : x
                                             let displayY = isDragging ? dragStartPosition.y + draggingOffset.height : y
@@ -217,7 +222,8 @@ struct AppGridView: View {
                                                     refreshGridItems()
                                                 }
                                             )
-                                            .scaleEffect(isDragging ? 1.1 : (isMergeReadyTarget ? 1.15 : (isMergeHoveringTarget ? 0.9 : 1.0)))
+                                            // Scale effect: folder targets scale up when merge hovering/ready, app targets scale down when hovering
+                                            .scaleEffect(isDragging ? 1.1 : (isMergeReadyTarget ? 1.15 : (isMergeHoveringTarget ? (isTargetFolder ? 1.1 : 0.9) : 1.0)))
                                             .zIndex(isDragging ? 100 : 0)
                                             .opacity(isDragging ? 0.9 : 1.0)
                                             // Only animate position for non-dragging items to avoid flicker
@@ -664,45 +670,35 @@ struct GridItemView: View {
     var onTap: () -> Void = {}
     var onAppLaunch: () -> Void = {}
 
-    // Cache icon to avoid repeated lookups
-    @State private var cachedIcon: NSImage?
     @State private var isHovered = false
 
+    // Check if target is a folder (for merge animation)
+    private var isFolder: Bool {
+        if case .folder = item { return true }
+        return false
+    }
+
     private var backgroundColor: Color {
-        if isMergeReady {
-            return Color.blue.opacity(0.4)
-        } else if isMergeHovering {
-            return Color.blue.opacity(0.2)
-        } else if isHovered {
+        if isHovered {
             return Color.white.opacity(0.2)
         }
         return Color.clear
     }
 
-    private var borderColor: Color {
-        if isMergeReady {
-            return Color.blue
-        } else if isMergeHovering {
-            return Color.blue.opacity(0.5)
-        }
-        return Color.clear
-    }
-
-    private var borderWidth: CGFloat {
-        isMergeReady ? 3 : 2
-    }
-
     var body: some View {
         VStack {
             ZStack {
-                // Folder preview background (appears during merge hovering)
-                if isMergeHovering || isMergeReady {
+                // Folder preview background (gray folder style for merge)
+                // Only show for app-to-app merge, not for folder targets
+                if (isMergeHovering || isMergeReady) && !isFolder {
+                    // Use gray folder style instead of blue border
                     RoundedRectangle(cornerRadius: iconSize * 0.2)
                         .fill(Color.gray.opacity(0.4))
-                        .frame(width: iconSize * 1.1, height: iconSize * 1.1)
+                        .frame(width: iconSize * 1.15, height: iconSize * 1.15)
                 }
 
-                Image(nsImage: cachedIcon ?? item.icon)
+                // Always use item.icon directly - no caching to avoid stale icons
+                Image(nsImage: item.icon)
                     .resizable()
                     .interpolation(.high)
                     .frame(width: iconSize, height: iconSize)
@@ -720,10 +716,6 @@ struct GridItemView: View {
             RoundedRectangle(cornerRadius: 8)
                 .fill(backgroundColor)
         )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(borderColor, lineWidth: borderWidth)
-        )
         .onHover { hovering in
             isHovered = hovering
         }
@@ -739,16 +731,6 @@ struct GridItemView: View {
             case .empty:
                 break  // Empty slots are not tappable
             }
-        }
-        .onAppear {
-            // Cache icon on appear
-            if cachedIcon == nil {
-                cachedIcon = item.icon
-            }
-        }
-        .onChange(of: item) { _, newItem in
-            // Update cached icon when item changes (e.g., folder content updated)
-            cachedIcon = newItem.icon
         }
     }
 }
@@ -768,6 +750,13 @@ struct FolderOverlayView: View {
     @State private var currentPage = 0
     @State private var dragOffset: CGFloat = 0
 
+    // Drag-to-reorder state for folder apps
+    @State private var draggingApp: AppItem?
+    @State private var draggingOffset: CGSize = .zero
+    @State private var dragStartPosition: CGPoint = .zero
+    @State private var dragCurrentIndex: Int?
+    @State private var dragTargetIndex: Int?
+
     init(folder: FolderItem, iconSize: CGFloat, screenSize: CGSize, onClose: @escaping () -> Void, onAppLaunch: @escaping () -> Void, onFolderUpdate: @escaping (FolderItem) -> Void) {
         self.folder = folder
         self.iconSize = iconSize
@@ -778,9 +767,9 @@ struct FolderOverlayView: View {
         self._folderName = State(initialValue: folder.name)
     }
 
-    // Folder grid uses (rows - 1) x (columns - 1)
-    private var folderRows: Int { max(1, LauncherSettings.rowsCount - 1) }
-    private var folderColumns: Int { max(1, LauncherSettings.columnsCount - 1) }
+    // Folder grid uses (rows - 2) x (columns - 2)
+    private var folderRows: Int { max(1, LauncherSettings.rowsCount - 2) }
+    private var folderColumns: Int { max(1, LauncherSettings.columnsCount - 2) }
     private var appsPerPage: Int { folderRows * folderColumns }
 
     private var totalPages: Int {
@@ -792,6 +781,80 @@ struct FolderOverlayView: View {
         let end = min(start + appsPerPage, folder.apps.count)
         guard start < folder.apps.count else { return [] }
         return Array(folder.apps[start..<end])
+    }
+
+    // Get apps for page with visual reordering during drag
+    private func appsForPageWithDrag(_ page: Int) -> [(position: Int, app: AppItem)] {
+        let start = page * appsPerPage
+        let end = min(start + appsPerPage, folder.apps.count)
+        guard start < folder.apps.count else { return [] }
+
+        // During drag: show visual reordering
+        if let _ = draggingApp,
+           let fromIndex = dragCurrentIndex,
+           let toIndex = dragTargetIndex,
+           fromIndex != toIndex {
+            var result: [(position: Int, app: AppItem)] = []
+
+            for visualPos in 0..<appsPerPage {
+                let globalVisualPos = start + visualPos
+                guard globalVisualPos < folder.apps.count else { continue }
+
+                let sourceIndex: Int
+                if globalVisualPos == toIndex {
+                    sourceIndex = fromIndex
+                } else if fromIndex < toIndex {
+                    if globalVisualPos > fromIndex && globalVisualPos <= toIndex {
+                        sourceIndex = globalVisualPos
+                    } else if globalVisualPos == fromIndex {
+                        continue
+                    } else {
+                        sourceIndex = globalVisualPos
+                    }
+                } else {
+                    if globalVisualPos >= toIndex && globalVisualPos < fromIndex {
+                        sourceIndex = globalVisualPos + 1
+                    } else if globalVisualPos == fromIndex {
+                        continue
+                    } else {
+                        sourceIndex = globalVisualPos
+                    }
+                }
+
+                if sourceIndex >= 0 && sourceIndex < folder.apps.count {
+                    result.append((position: visualPos, app: folder.apps[sourceIndex]))
+                }
+            }
+            return result
+        }
+
+        // Normal case
+        var result: [(position: Int, app: AppItem)] = []
+        for (offset, index) in (start..<end).enumerated() {
+            result.append((position: offset, app: folder.apps[index]))
+        }
+        return result
+    }
+
+    private func finishFolderDragging() {
+        // Apply the reorder if target changed
+        if let fromIndex = dragCurrentIndex,
+           let toIndex = dragTargetIndex,
+           fromIndex != toIndex {
+            var updated = folder
+            let movedApp = updated.apps.remove(at: fromIndex)
+            let insertIndex = toIndex > fromIndex ? toIndex - 1 : toIndex
+            updated.apps.insert(movedApp, at: min(insertIndex, updated.apps.count))
+            onFolderUpdate(updated)
+        }
+
+        withAnimation(.easeOut(duration: 0.2)) {
+            draggingApp = nil
+            draggingOffset = .zero
+            dragStartPosition = .zero
+            dragCurrentIndex = nil
+            dragTargetIndex = nil
+        }
     }
 
     // Calculate cell size based on launcher's cell size
@@ -855,12 +918,19 @@ struct FolderOverlayView: View {
                             ForEach(0..<totalPages, id: \.self) { page in
                                 // Grid for each page - use ZStack with position like launcher
                                 ZStack {
-                                    let apps = appsForPage(page)
-                                    ForEach(Array(apps.enumerated()), id: \.element.id) { index, app in
-                                        let row = index / folderColumns
-                                        let col = index % folderColumns
+                                    let pageApps = appsForPageWithDrag(page)
+                                    ForEach(pageApps, id: \.app.id) { itemData in
+                                        let app = itemData.app
+                                        let position = itemData.position
+                                        let row = position / folderColumns
+                                        let col = position % folderColumns
                                         let x = launcherCellWidth * (CGFloat(col) + 0.5)
                                         let y = launcherCellHeight * (CGFloat(row) + 0.5)
+                                        let isDragging = draggingApp?.id == app.id
+                                        let globalIndex = folder.apps.firstIndex(where: { $0.id == app.id }) ?? (page * appsPerPage + position)
+
+                                        let displayX = isDragging ? dragStartPosition.x + draggingOffset.width : x
+                                        let displayY = isDragging ? dragStartPosition.y + draggingOffset.height : y
 
                                         FolderAppItemView(
                                             app: app,
@@ -881,7 +951,49 @@ struct FolderOverlayView: View {
                                                 }
                                             }
                                         )
-                                        .position(x: x, y: y)
+                                        .scaleEffect(isDragging ? 1.1 : 1.0)
+                                        .zIndex(isDragging ? 100 : 0)
+                                        .opacity(isDragging ? 0.9 : 1.0)
+                                        .animation(isDragging ? nil : .easeInOut(duration: 0.2), value: position)
+                                        .position(x: displayX, y: displayY)
+                                        .highPriorityGesture(
+                                            DragGesture(minimumDistance: 15)
+                                                .onChanged { drag in
+                                                    if draggingApp == nil {
+                                                        draggingApp = app
+                                                        dragCurrentIndex = globalIndex
+                                                        dragTargetIndex = globalIndex
+                                                        dragStartPosition = CGPoint(x: x, y: y)
+                                                    }
+
+                                                    if draggingApp?.id == app.id {
+                                                        draggingOffset = drag.translation
+
+                                                        // Calculate target index based on drag position
+                                                        let dragX = dragStartPosition.x + drag.translation.width
+                                                        let dragY = dragStartPosition.y + drag.translation.height
+                                                        let targetCol = Int(floor(dragX / launcherCellWidth))
+                                                        let targetRow = Int(floor(dragY / launcherCellHeight))
+
+                                                        if targetCol >= 0 && targetCol < folderColumns &&
+                                                           targetRow >= 0 && targetRow < folderRows {
+                                                            let targetPosInPage = targetRow * folderColumns + targetCol
+                                                            let targetIndex = currentPage * appsPerPage + targetPosInPage
+
+                                                            if targetIndex >= 0 && targetIndex < folder.apps.count && targetIndex != dragTargetIndex {
+                                                                withAnimation(.easeInOut(duration: 0.2)) {
+                                                                    dragTargetIndex = targetIndex
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                .onEnded { _ in
+                                                    if draggingApp?.id == app.id {
+                                                        finishFolderDragging()
+                                                    }
+                                                }
+                                        )
                                     }
                                 }
                                 .frame(width: contentWidth, height: contentHeight)
@@ -937,9 +1049,11 @@ struct FolderOverlayView: View {
                 .frame(width: folderWidth, height: folderHeight + (totalPages > 1 ? 20 : 0))
                 .background(
                     RoundedRectangle(cornerRadius: 20)
-                        .fill(Color.gray.opacity(0.5))
-                        .background(.ultraThinMaterial)
-                        .clipShape(RoundedRectangle(cornerRadius: 20))
+                        .fill(Color.clear)
+                        .background(
+                            VisualEffectView()
+                                .clipShape(RoundedRectangle(cornerRadius: 20))
+                        )
                 )
                 .position(x: geo.size.width / 2, y: geo.size.height / 2)
             }
@@ -958,31 +1072,22 @@ struct FolderAppItemView: View {
 
     var body: some View {
         VStack {
-            ZStack(alignment: .topLeading) {
-                Image(nsImage: app.icon)
-                    .resizable()
-                    .frame(width: iconSize, height: iconSize)
-                    .scaleEffect(isHovered ? 1.1 : 1.0)
-                    .animation(.easeOut(duration: 0.15), value: isHovered)
-
-                // Remove button on hover
-                if isHovered {
-                    Button(action: onRemove) {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundColor(.white)
-                            .background(Circle().fill(Color.black.opacity(0.5)))
-                    }
-                    .buttonStyle(.plain)
-                    .offset(x: -5, y: -5)
-                }
-            }
+            Image(nsImage: app.icon)
+                .resizable()
+                .frame(width: iconSize, height: iconSize)
+                .scaleEffect(isHovered ? 1.1 : 1.0)
+                .animation(.easeOut(duration: 0.15), value: isHovered)
 
             Text(app.name)
                 .font(.caption)
                 .foregroundColor(.white)
                 .lineLimit(1)
         }
-        .padding(4)
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(isHovered ? Color.white.opacity(0.2) : Color.clear)
+        )
         .onHover { hovering in
             isHovered = hovering
         }
