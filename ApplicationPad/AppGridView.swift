@@ -59,7 +59,7 @@ struct AppGridView: View {
         if key.isEmpty {
             return gridItems.isEmpty ? LauncherSettings.applyCustomOrder(to: apps) : gridItems
         }
-        // When searching, flatten folders and search all apps
+        // When searching, flatten folders and search all apps (skip empty slots)
         var allApps: [AppItem] = []
         for item in gridItems {
             switch item {
@@ -67,6 +67,8 @@ struct AppGridView: View {
                 allApps.append(app)
             case .folder(let folder):
                 allApps.append(contentsOf: folder.apps)
+            case .empty:
+                break  // Skip empty slots
             }
         }
         return allApps.filter {
@@ -128,17 +130,26 @@ struct AppGridView: View {
                 }
 
                 if sourceIndex >= 0 && sourceIndex < filteredItems.count {
-                    result.append((position: visualPos, item: filteredItems[sourceIndex]))
+                    let item = filteredItems[sourceIndex]
+                    // Skip empty slots
+                    if !item.isEmpty {
+                        result.append((position: visualPos, item: item))
+                    }
                 }
             }
 
             return result
         }
 
-        // Normal case: return items in order
-        return (start..<end).enumerated().map { offset, index in
-            (position: offset, item: filteredItems[index])
+        // Normal case: return items in order, skipping empty slots
+        var result: [(position: Int, item: LauncherItem)] = []
+        for (offset, index) in (start..<end).enumerated() {
+            let item = filteredItems[index]
+            if !item.isEmpty {
+                result.append((position: offset, item: item))
+            }
         }
+        return result
     }
 
     var body: some View {
@@ -477,21 +488,23 @@ struct AppGridView: View {
             appsToAdd.append(app)
         case .folder(let folder):
             appsToAdd.append(contentsOf: folder.apps)
+        case .empty:
+            break
         }
 
         // Check if target is already a folder
         if case .folder(var existingFolder) = targetItem {
+            // Clear folder icon cache before modifying
+            FolderIconCache.shared.clearCache()
+
             // Add apps to existing folder
             existingFolder.apps.append(contentsOf: appsToAdd)
 
             withAnimation(.easeInOut(duration: 0.2)) {
-                // Remove dragging item
-                gridItems.remove(at: currentIndex)
-                // Update folder at its position (adjust index if needed)
-                let adjustedTargetIndex = currentIndex < targetIndex ? targetIndex - 1 : targetIndex
-                if adjustedTargetIndex < gridItems.count {
-                    gridItems[adjustedTargetIndex] = .folder(existingFolder)
-                }
+                // Replace dragging item with empty slot to preserve page structure
+                gridItems[currentIndex] = .empty(UUID())
+                // Update folder at its position
+                gridItems[targetIndex] = .folder(existingFolder)
             }
         } else {
             // Target is an app, create a new folder
@@ -505,15 +518,10 @@ struct AppGridView: View {
             let newFolder = FolderItem(name: "Folder", apps: appsToMerge)
 
             withAnimation(.easeInOut(duration: 0.2)) {
-                // Remove both items (remove higher index first to avoid index shifting issues)
-                let indicesToRemove = [currentIndex, targetIndex].sorted(by: >)
-                for idx in indicesToRemove {
-                    gridItems.remove(at: idx)
-                }
-
-                // Insert folder at the lower index
-                let insertIndex = min(currentIndex, targetIndex)
-                gridItems.insert(.folder(newFolder), at: min(insertIndex, gridItems.count))
+                // Replace dragging item with empty slot to preserve page structure
+                gridItems[currentIndex] = .empty(UUID())
+                // Replace target item with new folder
+                gridItems[targetIndex] = .folder(newFolder)
             }
         }
 
@@ -526,12 +534,6 @@ struct AppGridView: View {
         dragAccumulatedOffset = .zero
         dragMouseOffset = .zero
         dragStateMachine.reset()
-
-        // Adjust current page if needed (items count decreased)
-        let newTotalPages = max(1, Int(ceil(Double(gridItems.count) / Double(appsPerPage))))
-        if currentPage >= newTotalPages {
-            currentPage = newTotalPages - 1
-        }
 
         // Save
         LauncherSettings.saveGridItems(gridItems)
@@ -734,6 +736,8 @@ struct GridItemView: View {
                 LauncherPanel.shared.close()
             case .folder:
                 onTap()
+            case .empty:
+                break  // Empty slots are not tappable
             }
         }
         .onAppear {
@@ -741,6 +745,10 @@ struct GridItemView: View {
             if cachedIcon == nil {
                 cachedIcon = item.icon
             }
+        }
+        .onChange(of: item) { _, newItem in
+            // Update cached icon when item changes (e.g., folder content updated)
+            cachedIcon = newItem.icon
         }
     }
 }
@@ -929,7 +937,7 @@ struct FolderOverlayView: View {
                 .frame(width: folderWidth, height: folderHeight + (totalPages > 1 ? 20 : 0))
                 .background(
                     RoundedRectangle(cornerRadius: 20)
-                        .fill(Color.gray.opacity(0.8))
+                        .fill(Color.gray.opacity(0.5))
                         .background(.ultraThinMaterial)
                         .clipShape(RoundedRectangle(cornerRadius: 20))
                 )

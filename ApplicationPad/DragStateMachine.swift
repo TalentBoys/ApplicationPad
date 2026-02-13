@@ -114,7 +114,7 @@ class DragStateMachine: ObservableObject {
 
     // Configuration
     private let mergeHoverDuration: TimeInterval = 0.35  // Time to confirm merge
-    private let mergeZoneRatio: CGFloat = 0.6            // 60% center area for merge
+    private let mergeZoneRatio: CGFloat = 1.0            // 100% icon area for merge
     private let velocityThreshold: CGFloat = 800        // pixels/second - fast = reorder
 
     // Internal state
@@ -267,6 +267,11 @@ class DragStateMachine: ObservableObject {
 
         let targetItem = gridItems[targetIndex]
 
+        // Skip empty slots - they can't be merge targets
+        guard !targetItem.isEmpty else {
+            return .none
+        }
+
         // Don't target self
         guard targetItem.id != draggingItemId else {
             return .none
@@ -302,24 +307,45 @@ class DragStateMachine: ObservableObject {
             return .mergeZone(targetId: targetItem.id, targetIndex: targetIndex, isFolder: isFolder)
         }
 
-        // For reorder: check if drag position has crossed the target's center
-        // This ensures we only swap when the dragged item truly "passes" the target
+        // For reorder: check if drag position has fully exited the target cell
+        // This ensures reorder only triggers when truly moving past the target
         //
-        // Key insight: after a reorder, the dragging item's index changes in the array,
-        // but the user's intent is still based on their original drag direction.
-        // We should trigger reorder when the drag position crosses the target center,
-        // regardless of current indices (which change after each reorder).
+        // Key insight: reorder should only happen when the drag position is
+        // clearly outside the target's icon area, not just past the center.
         let shouldTriggerReorder: Bool
 
-        // Simply check if we're past the center of the target cell
-        // If dragging position is right of center, we want to be at or after this position
-        // If dragging position is left of center, we want to be at or before this position
-        if position.x > iconCenterX {
-            // Position is right of target center - reorder if target is before us
-            shouldTriggerReorder = draggingIndex < targetIndex
+        // Check if we're outside the icon area (using cell boundaries for clearer separation)
+        let iconLeft = iconCenterX - iconSize / 2
+        let iconRight = iconCenterX + iconSize / 2
+        let iconTop = iconCenterY - iconSize / 2
+        let iconBottom = iconCenterY + iconSize / 2
+
+        // Determine if position is clearly outside the icon bounds
+        let isOutsideHorizontally = position.x < iconLeft || position.x > iconRight
+        let isOutsideVertically = position.y < iconTop || position.y > iconBottom
+
+        // Only trigger reorder if we're outside the icon area
+        if isOutsideHorizontally || isOutsideVertically {
+            // Check direction: should we swap with this target?
+            if position.x > iconRight {
+                // Position is right of target - reorder if target is before us
+                shouldTriggerReorder = draggingIndex < targetIndex
+            } else if position.x < iconLeft {
+                // Position is left of target - reorder if target is after us
+                shouldTriggerReorder = draggingIndex > targetIndex
+            } else if position.y > iconBottom {
+                // Position is below target (but within horizontal bounds)
+                // For same row movement, this means we're moving to next row
+                shouldTriggerReorder = draggingIndex < targetIndex
+            } else if position.y < iconTop {
+                // Position is above target (but within horizontal bounds)
+                // For same row movement, this means we're moving to previous row
+                shouldTriggerReorder = draggingIndex > targetIndex
+            } else {
+                shouldTriggerReorder = false
+            }
         } else {
-            // Position is left of target center - reorder if target is after us
-            shouldTriggerReorder = draggingIndex > targetIndex
+            shouldTriggerReorder = false
         }
 
         if shouldTriggerReorder {

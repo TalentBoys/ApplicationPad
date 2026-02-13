@@ -162,15 +162,17 @@ final class FolderIconCache {
     }
 }
 
-// Unified grid item that can be either an app or a folder
+// Unified grid item that can be either an app, a folder, or an empty slot
 enum LauncherItem: Identifiable, Equatable {
     case app(AppItem)
     case folder(FolderItem)
+    case empty(UUID)  // Empty slot placeholder
 
     var id: UUID {
         switch self {
         case .app(let app): return app.id
         case .folder(let folder): return folder.id
+        case .empty(let id): return id
         }
     }
 
@@ -178,6 +180,7 @@ enum LauncherItem: Identifiable, Equatable {
         switch self {
         case .app(let app): return app.name
         case .folder(let folder): return folder.name
+        case .empty: return ""
         }
     }
 
@@ -185,11 +188,17 @@ enum LauncherItem: Identifiable, Equatable {
         switch self {
         case .app(let app): return app.icon
         case .folder(let folder): return folder.icon
+        case .empty: return NSImage()
         }
     }
 
     var isFolder: Bool {
         if case .folder = self { return true }
+        return false
+    }
+
+    var isEmpty: Bool {
+        if case .empty = self { return true }
         return false
     }
 

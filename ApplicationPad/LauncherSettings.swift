@@ -58,9 +58,10 @@ struct LauncherSettings {
 
     // Codable wrapper for LauncherItem
     private struct LauncherItemData: Codable {
-        let type: String // "app" or "folder"
+        let type: String // "app", "folder", or "empty"
         let appData: AppItem?
         let folderData: FolderItem?
+        let emptyId: UUID?
 
         init(from launcherItem: LauncherItem) {
             switch launcherItem {
@@ -68,10 +69,17 @@ struct LauncherSettings {
                 type = "app"
                 appData = app
                 folderData = nil
+                emptyId = nil
             case .folder(let folder):
                 type = "folder"
                 appData = nil
                 folderData = folder
+                emptyId = nil
+            case .empty(let id):
+                type = "empty"
+                appData = nil
+                folderData = nil
+                emptyId = id
             }
         }
 
@@ -81,6 +89,8 @@ struct LauncherSettings {
                 if let app = appData { return .app(app) }
             case "folder":
                 if let folder = folderData { return .folder(folder) }
+            case "empty":
+                if let id = emptyId { return .empty(id) }
             default:
                 break
             }
@@ -127,6 +137,9 @@ struct LauncherSettings {
                     if !updatedApps.isEmpty {
                         result.append(.folder(FolderItem(id: folder.id, name: folder.name, apps: updatedApps)))
                     }
+                case .empty(let id):
+                    // Preserve empty slots to maintain page structure
+                    result.append(.empty(id))
                 }
             }
 
