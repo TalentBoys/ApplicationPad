@@ -114,11 +114,13 @@ class DragStateMachine: ObservableObject {
 
     // Configuration
     private let mergeHoverDuration: TimeInterval = 0.35  // Time to confirm merge
+    private let folderOpenDelay: TimeInterval = 2.0      // Time to open folder when dragging over it
     private let mergeZoneRatio: CGFloat = 1.0            // 100% icon area for merge
     private let velocityThreshold: CGFloat = 800        // pixels/second - fast = reorder
 
     // Internal state
     private var hoverTimer: Timer?
+    private var folderOpenTimer: Timer?
     private var lastDragPosition: CGPoint = .zero
     private var lastDragTime: Date = .now
     private var currentVelocity: CGFloat = 0
@@ -134,6 +136,7 @@ class DragStateMachine: ObservableObject {
     // Callbacks
     var onReorder: ((Int) -> Void)?
     var onMergeReady: ((UUID) -> Void)?
+    var onFolderOpen: ((UUID) -> Void)?  // Called when folder should open during drag
 
     // MARK: - Public API
 
@@ -158,7 +161,9 @@ class DragStateMachine: ObservableObject {
         horizontalPadding: CGFloat,
         topPadding: CGFloat,
         currentPage: Int,
-        appsPerPage: Int
+        appsPerPage: Int,
+        dragFromIndex: Int? = nil,  // Original index of dragging item
+        dragToIndex: Int? = nil     // Current visual target index
     ) {
         // Throttle updates
         let now = Date()
@@ -189,7 +194,9 @@ class DragStateMachine: ObservableObject {
             horizontalPadding: horizontalPadding,
             topPadding: topPadding,
             currentPage: currentPage,
-            appsPerPage: appsPerPage
+            appsPerPage: appsPerPage,
+            dragFromIndex: dragFromIndex,
+            dragToIndex: dragToIndex
         )
 
         // Skip if hit zone hasn't changed (for non-velocity-based transitions)
@@ -237,6 +244,7 @@ class DragStateMachine: ObservableObject {
         internalState = .idle
         mergeState = .none
         cancelHoverTimer()
+        cancelFolderOpenTimer()
         currentVelocity = 0
         lastHitZone = .none
     }
@@ -255,7 +263,9 @@ class DragStateMachine: ObservableObject {
         horizontalPadding: CGFloat,
         topPadding: CGFloat,
         currentPage: Int,
-        appsPerPage: Int
+        appsPerPage: Int,
+        dragFromIndex: Int? = nil,
+        dragToIndex: Int? = nil
     ) -> HitZone {
         // Clear pending reorder info
         pendingReorderInfo = nil
@@ -270,14 +280,25 @@ class DragStateMachine: ObservableObject {
         }
 
         let targetIndexInPage = row * columnsCount + col
-        let targetIndex = currentPage * appsPerPage + targetIndexInPage
+        let visualTargetIndex = currentPage * appsPerPage + targetIndexInPage
+
+        // Map visual position to actual array index, accounting for ongoing reorder
+        // If we're in the middle of a reorder (dragFromIndex != dragToIndex),
+        // the visual positions are different from array positions
+        let actualTargetIndex: Int
+        if let fromIndex = dragFromIndex, let toIndex = dragToIndex, fromIndex != toIndex {
+            // Map visual index back to array index
+            actualTargetIndex = mapVisualToArrayIndex(visualIndex: visualTargetIndex, fromIndex: fromIndex, toIndex: toIndex, totalItems: gridItems.count)
+        } else {
+            actualTargetIndex = visualTargetIndex
+        }
 
         // Check if there's an item at this position
-        guard targetIndex >= 0, targetIndex < gridItems.count else {
+        guard actualTargetIndex >= 0, actualTargetIndex < gridItems.count else {
             return .none
         }
 
-        let targetItem = gridItems[targetIndex]
+        let targetItem = gridItems[actualTargetIndex]
 
         // Skip empty slots - they can't be merge targets
         guard !targetItem.isEmpty else {
@@ -295,7 +316,7 @@ class DragStateMachine: ObservableObject {
         }
         let draggingItem = gridItems[draggingIndex]
 
-        // Calculate icon center position
+        // Calculate icon center position (using visual position)
         let iconCenterX = horizontalPadding + cellWidth * (CGFloat(col) + 0.5)
         let iconCenterY = topPadding + cellHeight * (CGFloat(row) + 0.5)
         let targetCenter = CGPoint(x: iconCenterX, y: iconCenterY)
@@ -316,7 +337,7 @@ class DragStateMachine: ObservableObject {
             } else {
                 isFolder = false
             }
-            return .mergeZone(targetId: targetItem.id, targetIndex: targetIndex, isFolder: isFolder)
+            return .mergeZone(targetId: targetItem.id, targetIndex: actualTargetIndex, isFolder: isFolder)
         }
 
         // For reorder: check if drag position has fully exited the target cell
@@ -341,18 +362,18 @@ class DragStateMachine: ObservableObject {
             // Check direction: should we swap with this target?
             if position.x > iconRight {
                 // Position is right of target - reorder if target is before us
-                shouldTriggerReorder = draggingIndex < targetIndex
+                shouldTriggerReorder = draggingIndex < visualTargetIndex
             } else if position.x < iconLeft {
                 // Position is left of target - reorder if target is after us
-                shouldTriggerReorder = draggingIndex > targetIndex
+                shouldTriggerReorder = draggingIndex > visualTargetIndex
             } else if position.y > iconBottom {
                 // Position is below target (but within horizontal bounds)
                 // For same row movement, this means we're moving to next row
-                shouldTriggerReorder = draggingIndex < targetIndex
+                shouldTriggerReorder = draggingIndex < visualTargetIndex
             } else if position.y < iconTop {
                 // Position is above target (but within horizontal bounds)
                 // For same row movement, this means we're moving to previous row
-                shouldTriggerReorder = draggingIndex > targetIndex
+                shouldTriggerReorder = draggingIndex > visualTargetIndex
             } else {
                 shouldTriggerReorder = false
             }
@@ -367,13 +388,39 @@ class DragStateMachine: ObservableObject {
                 draggingIndex: draggingIndex,
                 draggingPosition: position,
                 targetName: targetItem.name,
-                targetIndex: targetIndex,
+                targetIndex: actualTargetIndex,
                 targetCenter: targetCenter
             )
-            return .reorderZone(targetIndex: targetIndex)
+            return .reorderZone(targetIndex: visualTargetIndex)  // Return visual index for reorder
         }
 
         return .none
+    }
+
+    // Helper function to map visual position to actual array index during drag
+    private func mapVisualToArrayIndex(visualIndex: Int, fromIndex: Int, toIndex: Int, totalItems: Int) -> Int {
+        // If visual position equals the target position, it shows the dragging item
+        if visualIndex == toIndex {
+            return fromIndex  // The dragging item is at fromIndex in the array
+        }
+
+        // For other positions, we need to reverse the visual shift
+        if fromIndex < toIndex {
+            // Dragging right: items between from+1..to have shifted left visually
+            // So visual position X corresponds to array position X+1 in that range
+            if visualIndex >= fromIndex && visualIndex < toIndex {
+                return visualIndex + 1
+            }
+        } else {
+            // Dragging left: items between to+1..from have shifted right visually
+            // So visual position X corresponds to array position X-1 in that range
+            if visualIndex > toIndex && visualIndex <= fromIndex {
+                return visualIndex - 1
+            }
+        }
+
+        // Outside the affected range, visual = actual
+        return visualIndex
     }
 
     // MARK: - Process Hit Zone
@@ -398,6 +445,7 @@ class DragStateMachine: ObservableObject {
         switch hitZone {
         case .none:
             transition(with: .leaveTarget)
+            cancelFolderOpenTimer()  // Cancel folder timer when leaving target
 
         case .mergeZone(let targetId, _, let isFolder):
             print("   📍 In merge zone for target \(targetId.uuidString.prefix(8)), isFolder=\(isFolder)")
@@ -414,6 +462,9 @@ class DragStateMachine: ObservableObject {
                 internalState = .mergeReady(targetId: targetId)
                 updateMergeDisplayState()
                 onMergeReady?(targetId)
+
+                // Start folder open timer (2s delay to open folder)
+                startFolderOpenTimer(targetId: targetId)
                 return
             }
 
@@ -425,6 +476,7 @@ class DragStateMachine: ObservableObject {
                 return
             }
             print("   🆕 Starting hover on new target")
+            cancelFolderOpenTimer()  // Cancel folder timer when not hovering over folder
             transition(with: .enterMergeZone(targetId: targetId))
             startHoverTimer()
 
@@ -549,5 +601,23 @@ class DragStateMachine: ObservableObject {
     private func cancelHoverTimer() {
         hoverTimer?.invalidate()
         hoverTimer = nil
+    }
+
+    // MARK: - Folder Open Timer
+
+    private func startFolderOpenTimer(targetId: UUID) {
+        cancelFolderOpenTimer()
+        print("📂 Starting folder open timer for \(folderOpenDelay)s")
+        folderOpenTimer = Timer.scheduledTimer(withTimeInterval: folderOpenDelay, repeats: false) { [weak self] _ in
+            DispatchQueue.main.async {
+                print("📂 Folder open timer fired!")
+                self?.onFolderOpen?(targetId)
+            }
+        }
+    }
+
+    private func cancelFolderOpenTimer() {
+        folderOpenTimer?.invalidate()
+        folderOpenTimer = nil
     }
 }

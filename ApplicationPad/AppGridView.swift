@@ -48,6 +48,10 @@ struct AppGridView: View {
     // Open folder state
     @State private var openFolder: FolderItem?
 
+    // State for dragging into open folder
+    @State private var dragIntoFolderTargetIndex: Int?  // Target position inside folder
+    @State private var dragIntoFolderTargetId: UUID?    // The folder being dragged into
+
     var columnsCount: Int { LauncherSettings.columnsCount }
     var rowsCount: Int { LauncherSettings.rowsCount }
     var appsPerPage: Int { LauncherSettings.appsPerPage }
@@ -401,10 +405,19 @@ struct AppGridView: View {
                         folder: folder,
                         iconSize: iconSize,
                         screenSize: geometry.size,
+                        externalDraggingItem: draggingItem,
+                        externalDraggingOffset: draggingOffset,
+                        externalDragStartPosition: dragStartPosition,
                         onClose: {
+                            // If we're dragging into folder, don't close
+                            if draggingItem != nil && dragIntoFolderTargetId != nil {
+                                return
+                            }
                             withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                                 openFolder = nil
                             }
+                            dragIntoFolderTargetId = nil
+                            dragIntoFolderTargetIndex = nil
                         },
                         onAppLaunch: {
                             apps = AppScanner.scan()
@@ -414,6 +427,12 @@ struct AppGridView: View {
                             updateFolder(updatedFolder)
                             // Also update openFolder so FolderContentView sees the changes
                             openFolder = updatedFolder
+                        },
+                        onDragIntoFolder: { targetIndex in
+                            dragIntoFolderTargetIndex = targetIndex
+                        },
+                        onDragOutOfFolder: { app, dragPosition in
+                            handleDragOutOfFolder(app: app, dragPosition: dragPosition, folder: folder, geo: geometry)
                         }
                     )
                 }
@@ -482,6 +501,74 @@ struct AppGridView: View {
         LauncherPanel.shared.close()
         searchText = ""
         openFolder = nil
+    }
+
+    private func handleDragOutOfFolder(app: AppItem, dragPosition: CGPoint, folder: FolderItem, geo: GeometryProxy) {
+        print("📤 App dragged out of folder: \(app.name) at position \(dragPosition)")
+
+        // Remove app from folder
+        var updatedFolder = folder
+        updatedFolder.apps.removeAll { $0.id == app.id }
+
+        // Update the folder in gridItems
+        if let folderIndex = gridItems.firstIndex(where: {
+            if case .folder(let f) = $0 { return f.id == folder.id }
+            return false
+        }) {
+            FolderIconCache.shared.clearCache()
+
+            if updatedFolder.apps.isEmpty {
+                gridItems.remove(at: folderIndex)
+            } else if updatedFolder.apps.count == 1 {
+                gridItems[folderIndex] = .app(updatedFolder.apps[0])
+            } else {
+                gridItems[folderIndex] = .folder(updatedFolder)
+            }
+            LauncherSettings.saveGridItems(gridItems)
+        }
+
+        // Close folder
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+            openFolder = nil
+        }
+
+        // Calculate cell dimensions for main grid
+        let screenHeight = geo.size.height
+        let notchHeight: CGFloat = 50
+        let searchHeight: CGFloat = 60
+        let pageIndicatorHeight: CGFloat = totalPages > 1 ? 50 : 0
+        let availableHeight = screenHeight - notchHeight - searchHeight - pageIndicatorHeight - topPadding - bottomPadding
+        let cellWidth = (geo.size.width - horizontalPadding * 2) / CGFloat(columnsCount)
+        let cellHeight = (availableHeight + topPadding + bottomPadding - topPadding - bottomPadding) / CGFloat(rowsCount)
+
+        // Calculate grid position from drag position
+        let col = Int(floor((dragPosition.x - horizontalPadding) / cellWidth))
+        let row = Int(floor((dragPosition.y - notchHeight - searchHeight - topPadding) / cellHeight))
+
+        // Calculate target index
+        let validCol = max(0, min(col, columnsCount - 1))
+        let validRow = max(0, min(row, rowsCount - 1))
+        let targetIndexInPage = validRow * columnsCount + validCol
+        let targetIndex = currentPage * appsPerPage + targetIndexInPage
+
+        // Start dragging the app in the main grid
+        draggingItem = .app(app)
+        dragStartPosition = dragPosition
+        draggingOffset = .zero
+        dragAccumulatedOffset = .zero
+        dragMouseOffset = .zero
+
+        // Find or create position for the app
+        let insertIndex = max(0, min(targetIndex, gridItems.count))
+        gridItems.insert(.app(app), at: insertIndex)
+        dragCurrentIndex = insertIndex
+        dragTargetIndex = insertIndex
+
+        // Start the drag state machine
+        dragStateMachine.startDrag()
+        setupStateMachineCallbacks(cellWidth: cellWidth, cellHeight: cellHeight)
+
+        LauncherSettings.saveGridItems(gridItems)
     }
 
     private func updateDragPosition(dragX: CGFloat, dragY: CGFloat, screenX: CGFloat, cellWidth: CGFloat, cellHeight: CGFloat) {
@@ -567,7 +654,9 @@ struct AppGridView: View {
             horizontalPadding: horizontalPadding,
             topPadding: topPadding,
             currentPage: currentPage,
-            appsPerPage: appsPerPage
+            appsPerPage: appsPerPage,
+            dragFromIndex: currentIndex,
+            dragToIndex: dragTargetIndex
         )
     }
 
@@ -589,6 +678,23 @@ struct AppGridView: View {
             // Visual feedback is handled by state machine state
             // Haptic feedback for trackpad
             NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .default)
+        }
+
+        dragStateMachine.onFolderOpen = { [self] targetId in
+            // Find the folder being dragged over
+            guard let folderIndex = gridItems.firstIndex(where: { $0.id == targetId }),
+                  case .folder(let folder) = gridItems[folderIndex] else { return }
+
+            print("📂 Opening folder for drag-into: \(folder.name)")
+
+            // Store the folder we're dragging into
+            dragIntoFolderTargetId = targetId
+            dragIntoFolderTargetIndex = 0  // Default to first position
+
+            // Open the folder
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                openFolder = folder
+            }
         }
     }
 
@@ -656,6 +762,61 @@ struct AppGridView: View {
     }
 
     private func finishDragging() {
+        // Check if we're dragging into an open folder
+        if let folderId = dragIntoFolderTargetId,
+           let targetInsertIndex = dragIntoFolderTargetIndex,
+           let folderIndex = gridItems.firstIndex(where: { $0.id == folderId }),
+           case .folder(var folder) = gridItems[folderIndex],
+           let currentIndex = dragCurrentIndex,
+           let dragging = draggingItem {
+
+            print("📂 Dropping into folder at position \(targetInsertIndex)")
+
+            // Get apps to add from dragging item
+            var appsToAdd: [AppItem] = []
+            switch dragging {
+            case .app(let app):
+                appsToAdd.append(app)
+            case .folder(let draggedFolder):
+                appsToAdd.append(contentsOf: draggedFolder.apps)
+            case .empty:
+                break
+            }
+
+            // Insert apps at target position
+            let insertAt = min(targetInsertIndex, folder.apps.count)
+            folder.apps.insert(contentsOf: appsToAdd, at: insertAt)
+
+            // Clear folder icon cache before modifying
+            FolderIconCache.shared.clearCache()
+
+            // Replace dragging item with empty slot
+            gridItems[currentIndex] = .empty(UUID())
+            gridItems[folderIndex] = .folder(folder)
+
+            // Close folder and save
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                openFolder = nil
+            }
+
+            LauncherSettings.saveGridItems(gridItems)
+
+            // Clear drag state
+            draggingItem = nil
+            draggingOffset = .zero
+            dragCurrentIndex = nil
+            dragTargetIndex = nil
+            dragStartPosition = .zero
+            dragAccumulatedOffset = .zero
+            dragMouseOffset = .zero
+            dragEdgePageChanged = false
+            dragEdgeStartTime = nil
+            dragIntoFolderTargetId = nil
+            dragIntoFolderTargetIndex = nil
+            dragStateMachine.reset()
+            return
+        }
+
         // Ask state machine if we should merge
         let (shouldMerge, targetId) = dragStateMachine.endDrag()
 
@@ -711,6 +872,8 @@ struct AppGridView: View {
             dragEdgePageChanged = false
             dragEdgeStartTime = nil
         }
+        dragIntoFolderTargetId = nil
+        dragIntoFolderTargetIndex = nil
     }
 
     private func startScrollMonitor() {
@@ -869,9 +1032,14 @@ struct FolderOverlayView: View {
     let folder: FolderItem
     let iconSize: CGFloat
     let screenSize: CGSize
+    let externalDraggingItem: LauncherItem?
+    let externalDraggingOffset: CGSize
+    let externalDragStartPosition: CGPoint
     let onClose: () -> Void
     let onAppLaunch: () -> Void
     let onFolderUpdate: (FolderItem) -> Void
+    let onDragIntoFolder: (Int) -> Void
+    let onDragOutOfFolder: (AppItem, CGPoint) -> Void  // Called when dragging app out of folder
 
     @State private var folderName: String
     @State private var isEditingName = false
@@ -887,13 +1055,28 @@ struct FolderOverlayView: View {
     @State private var dragCurrentIndex: Int?
     @State private var dragTargetIndex: Int?
 
-    init(folder: FolderItem, iconSize: CGFloat, screenSize: CGSize, onClose: @escaping () -> Void, onAppLaunch: @escaping () -> Void, onFolderUpdate: @escaping (FolderItem) -> Void) {
+    // Track external drag position inside folder
+    @State private var externalDragTargetIndex: Int?
+
+    init(folder: FolderItem, iconSize: CGFloat, screenSize: CGSize,
+         externalDraggingItem: LauncherItem? = nil,
+         externalDraggingOffset: CGSize = .zero,
+         externalDragStartPosition: CGPoint = .zero,
+         onClose: @escaping () -> Void, onAppLaunch: @escaping () -> Void,
+         onFolderUpdate: @escaping (FolderItem) -> Void,
+         onDragIntoFolder: @escaping (Int) -> Void = { _ in },
+         onDragOutOfFolder: @escaping (AppItem, CGPoint) -> Void = { _, _ in }) {
         self.folder = folder
         self.iconSize = iconSize
         self.screenSize = screenSize
+        self.externalDraggingItem = externalDraggingItem
+        self.externalDraggingOffset = externalDraggingOffset
+        self.externalDragStartPosition = externalDragStartPosition
         self.onClose = onClose
         self.onAppLaunch = onAppLaunch
         self.onFolderUpdate = onFolderUpdate
+        self.onDragIntoFolder = onDragIntoFolder
+        self.onDragOutOfFolder = onDragOutOfFolder
         self._folderName = State(initialValue: folder.name)
     }
 
@@ -1019,14 +1202,14 @@ struct FolderOverlayView: View {
 
         GeometryReader { geo in
             ZStack {
-                // Dimmed background
+                // Dimmed background - no animation, appears/disappears instantly
                 Color.black.opacity(0.3)
                     .ignoresSafeArea()
                     .onTapGesture {
                         onClose()
                     }
 
-                // Folder content - centered
+                // Folder content - centered, with animation
                 VStack(spacing: 0) {
                     // Folder name (editable)
                     if isEditingName {
@@ -1109,9 +1292,40 @@ struct FolderOverlayView: View {
                                                     if draggingApp?.id == app.id {
                                                         draggingOffset = drag.translation
 
-                                                        // Calculate target index based on drag position
+                                                        // Calculate drag position in folder local coordinates
                                                         let dragX = dragStartPosition.x + drag.translation.width
                                                         let dragY = dragStartPosition.y + drag.translation.height
+
+                                                        // Check if dragged outside folder bounds
+                                                        let margin: CGFloat = 30  // Some margin before triggering exit
+                                                        let isOutside = dragX < -margin ||
+                                                                       dragX > contentWidth + margin ||
+                                                                       dragY < -margin ||
+                                                                       dragY > contentHeight + margin
+
+                                                        if isOutside {
+                                                            // Calculate screen position for the drag
+                                                            let folderCenterX = geo.size.width / 2
+                                                            let folderCenterY = geo.size.height / 2
+                                                            let folderContentLeft = folderCenterX - contentWidth / 2
+                                                            let folderContentTop = folderCenterY - (contentHeight + titleHeight + folderPadding) / 2 + titleHeight + folderPadding / 2 + 12
+
+                                                            let screenDragX = folderContentLeft + dragX
+                                                            let screenDragY = folderContentTop + dragY
+
+                                                            // Clear drag state
+                                                            let draggedApp = app
+                                                            draggingApp = nil
+                                                            draggingOffset = .zero
+                                                            dragCurrentIndex = nil
+                                                            dragTargetIndex = nil
+
+                                                            // Notify parent to handle drag out of folder
+                                                            onDragOutOfFolder(draggedApp, CGPoint(x: screenDragX, y: screenDragY))
+                                                            return
+                                                        }
+
+                                                        // Calculate target index based on drag position
                                                         let targetCol = Int(floor(dragX / launcherCellWidth))
                                                         let targetRow = Int(floor(dragY / launcherCellHeight))
 
@@ -1196,14 +1410,60 @@ struct FolderOverlayView: View {
                         )
                 )
                 .position(x: geo.size.width / 2, y: geo.size.height / 2)
+                // Folder content animation (expand/collapse)
+                .transition(.opacity.combined(with: .scale(scale: 0.8)))
             }
         }
-        .transition(.opacity.combined(with: .scale(scale: 0.8)))
+        // No transition on the container - the dimmed background appears instantly
         .onAppear {
             startFolderScrollMonitor()
         }
         .onDisappear {
             stopFolderScrollMonitor()
+        }
+        .onChange(of: externalDraggingOffset) { _, newOffset in
+            // Track external drag position and calculate target index inside folder
+            guard externalDraggingItem != nil else { return }
+
+            // Calculate the drag position relative to folder content
+            let dragX = externalDragStartPosition.x + newOffset.width
+            let dragY = externalDragStartPosition.y + newOffset.height
+
+            // Folder is centered on screen
+            let folderCenterX = screenSize.width / 2
+            let folderCenterY = screenSize.height / 2
+            let contentWidth = launcherCellWidth * CGFloat(folderColumns)
+            let contentHeight = launcherCellHeight * CGFloat(folderRows)
+            let folderPadding: CGFloat = 40
+            let titleHeight: CGFloat = 40
+
+            // Calculate folder content bounds
+            let folderLeft = folderCenterX - contentWidth / 2
+            let folderTop = folderCenterY - (contentHeight + titleHeight + folderPadding) / 2 + titleHeight + folderPadding / 2 + 12
+
+            // Convert drag position to folder local coordinates
+            let localX = dragX - folderLeft
+            let localY = dragY - folderTop
+
+            // Calculate target cell
+            let targetCol = Int(floor(localX / launcherCellWidth))
+            let targetRow = Int(floor(localY / launcherCellHeight))
+
+            if targetCol >= 0 && targetCol < folderColumns &&
+               targetRow >= 0 && targetRow < folderRows {
+                let targetPosInPage = targetRow * folderColumns + targetCol
+                let targetIndex = currentPage * appsPerPage + targetPosInPage
+
+                // Clamp to valid range (0 to folder.apps.count)
+                let clampedIndex = max(0, min(targetIndex, folder.apps.count))
+
+                if clampedIndex != externalDragTargetIndex {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        externalDragTargetIndex = clampedIndex
+                    }
+                    onDragIntoFolder(clampedIndex)
+                }
+            }
         }
     }
 
