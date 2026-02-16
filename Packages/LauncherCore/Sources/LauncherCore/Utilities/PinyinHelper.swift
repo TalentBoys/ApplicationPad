@@ -1,6 +1,6 @@
 //
 //  PinyinHelper.swift
-//  ApplicationPad
+//  LauncherCore
 //
 //  Created by Jin, Kris on 2026/2/10.
 //
@@ -8,7 +8,7 @@
 import Foundation
 
 /// 获取完整拼音 (网易有道词典 -> wangyiyoudaocidian)
-func pinyin(_ string: String) -> String {
+public func pinyin(_ string: String) -> String {
     let mutable = NSMutableString(string: string) as CFMutableString
     CFStringTransform(mutable, nil, kCFStringTransformToLatin, false)
     CFStringTransform(mutable, nil, kCFStringTransformStripDiacritics, false)
@@ -16,7 +16,7 @@ func pinyin(_ string: String) -> String {
 }
 
 /// 获取拼音首字母 (网易有道词典 -> wyydcd)
-func pinyinInitials(_ string: String) -> String {
+public func pinyinInitials(_ string: String) -> String {
     let mutable = NSMutableString(string: string) as CFMutableString
     CFStringTransform(mutable, nil, kCFStringTransformToLatin, false)
     CFStringTransform(mutable, nil, kCFStringTransformStripDiacritics, false)

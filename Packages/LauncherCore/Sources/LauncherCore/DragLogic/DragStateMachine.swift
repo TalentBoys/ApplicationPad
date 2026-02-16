@@ -1,6 +1,6 @@
 //
 //  DragStateMachine.swift
-//  ApplicationPad
+//  LauncherCore
 //
 //  State machine for drag-to-merge vs drag-to-reorder behavior
 //  Following macOS Launchpad philosophy: "Reorder is default, merge is intentional"
@@ -12,24 +12,24 @@ import Combine
 
 // MARK: - Merge Display State (for UI updates only)
 
-enum MergeDisplayState: Equatable {
+public enum MergeDisplayState: Equatable, Sendable {
     case none
     case hovering(targetId: UUID)
     case ready(targetId: UUID)
 
-    var targetId: UUID? {
+    public var targetId: UUID? {
         switch self {
         case .none: return nil
         case .hovering(let id), .ready(let id): return id
         }
     }
 
-    var isHovering: Bool {
+    public var isHovering: Bool {
         if case .hovering = self { return true }
         return false
     }
 
-    var isReady: Bool {
+    public var isReady: Bool {
         if case .ready = self { return true }
         return false
     }
@@ -37,14 +37,14 @@ enum MergeDisplayState: Equatable {
 
 // MARK: - Drag State
 
-enum DragState: Equatable {
+public enum DragState: Equatable, Sendable {
     case idle
     case dragging
     case reorderCandidate(targetIndex: Int)
     case mergeHovering(targetId: UUID, startTime: Date)
     case mergeReady(targetId: UUID)
 
-    var targetId: UUID? {
+    public var targetId: UUID? {
         switch self {
         case .mergeHovering(let id, _), .mergeReady(let id):
             return id
@@ -53,17 +53,17 @@ enum DragState: Equatable {
         }
     }
 
-    var isMergeHovering: Bool {
+    public var isMergeHovering: Bool {
         if case .mergeHovering = self { return true }
         return false
     }
 
-    var isMergeReady: Bool {
+    public var isMergeReady: Bool {
         if case .mergeReady = self { return true }
         return false
     }
 
-    var isReorderCandidate: Bool {
+    public var isReorderCandidate: Bool {
         if case .reorderCandidate = self { return true }
         return false
     }
@@ -71,7 +71,7 @@ enum DragState: Equatable {
 
 // MARK: - Drag Event
 
-enum DragEvent {
+public enum DragEvent: Sendable {
     case startDrag
     case enterMergeZone(targetId: UUID)
     case enterReorderZone(targetIndex: Int)
@@ -83,7 +83,7 @@ enum DragEvent {
 
 // MARK: - Hit Zone
 
-enum HitZone: Equatable {
+public enum HitZone: Equatable, Sendable {
     case none
     case mergeZone(targetId: UUID, targetIndex: Int, isFolder: Bool)
     case reorderZone(targetIndex: Int)
@@ -91,26 +91,26 @@ enum HitZone: Equatable {
 
 // MARK: - Reorder Info (for logging)
 
-struct ReorderInfo {
-    let draggingName: String
-    let draggingIndex: Int
-    let draggingPosition: CGPoint
-    let targetName: String
-    let targetIndex: Int
-    let targetCenter: CGPoint
+public struct ReorderInfo: Sendable {
+    public let draggingName: String
+    public let draggingIndex: Int
+    public let draggingPosition: CGPoint
+    public let targetName: String
+    public let targetIndex: Int
+    public let targetCenter: CGPoint
 }
 
 // MARK: - Drag State Machine
 
 @MainActor
-class DragStateMachine: ObservableObject {
+public class DragStateMachine: ObservableObject {
     // Only publish merge-related states to minimize view updates
-    @Published private(set) var mergeState: MergeDisplayState = .none
+    @Published public private(set) var mergeState: MergeDisplayState = .none
 
     // Internal state (not published)
     private var internalState: DragState = .idle
 
-    var state: DragState { internalState }
+    public var state: DragState { internalState }
 
     // Configuration
     private let mergeHoverDuration: TimeInterval = 0.35  // Time to confirm merge
@@ -134,13 +134,15 @@ class DragStateMachine: ObservableObject {
     private var pendingReorderInfo: ReorderInfo?
 
     // Callbacks
-    var onReorder: ((Int) -> Void)?
-    var onMergeReady: ((UUID) -> Void)?
-    var onFolderOpen: ((UUID) -> Void)?  // Called when folder should open during drag
+    public var onReorder: ((Int) -> Void)?
+    public var onMergeReady: ((UUID) -> Void)?
+    public var onFolderOpen: ((UUID) -> Void)?  // Called when folder should open during drag
+
+    public init() {}
 
     // MARK: - Public API
 
-    func startDrag() {
+    public func startDrag() {
         transition(with: .startDrag)
         lastDragPosition = .zero
         lastDragTime = .now
@@ -149,7 +151,7 @@ class DragStateMachine: ObservableObject {
         lastUpdateTime = .distantPast
     }
 
-    func updateDrag(
+    public func updateDrag(
         position: CGPoint,
         gridItems: [LauncherItem],
         draggingItemId: UUID,
@@ -209,7 +211,7 @@ class DragStateMachine: ObservableObject {
         processHitZone(hitZone)
     }
 
-    func endDrag() -> (shouldMerge: Bool, targetId: UUID?) {
+    public func endDrag() -> (shouldMerge: Bool, targetId: UUID?) {
         let result: (shouldMerge: Bool, targetId: UUID?)
 
         print("🛑 endDrag called, current state=\(internalState)")
@@ -240,7 +242,7 @@ class DragStateMachine: ObservableObject {
         return result
     }
 
-    func reset() {
+    public func reset() {
         internalState = .idle
         mergeState = .none
         cancelHoverTimer()
@@ -293,16 +295,22 @@ class DragStateMachine: ObservableObject {
             actualTargetIndex = visualTargetIndex
         }
 
-        // Check if there's an item at this position
-        guard actualTargetIndex >= 0, actualTargetIndex < gridItems.count else {
+        // Check if position is beyond current items but within grid bounds
+        // This allows dropping to empty cells at the end of the grid
+        if actualTargetIndex >= gridItems.count {
+            // Allow dropping to the end of the list (append position)
+            let maxValidIndex = gridItems.count  // Can drop at the end
+            if visualTargetIndex <= maxValidIndex {
+                return .reorderZone(targetIndex: visualTargetIndex)
+            }
             return .none
         }
 
         let targetItem = gridItems[actualTargetIndex]
 
-        // Skip empty slots - they can't be merge targets
-        guard !targetItem.isEmpty else {
-            return .none
+        // Empty slots are valid drop targets for reorder
+        if targetItem.isEmpty {
+            return .reorderZone(targetIndex: visualTargetIndex)
         }
 
         // Don't target self

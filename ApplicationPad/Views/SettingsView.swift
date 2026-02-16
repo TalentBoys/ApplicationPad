@@ -7,6 +7,7 @@
 
 import SwiftUI
 import Carbon
+import LauncherCore
 
 struct SettingsView: View {
     @AppStorage("hotkeyModifiers") private var hotkeyModifiers: Int = cmdKey | shiftKey

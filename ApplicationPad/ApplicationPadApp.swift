@@ -7,6 +7,7 @@
 
 import SwiftUI
 import Carbon
+import LauncherCore
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -20,7 +21,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         // Show launcher on first launch
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+        DispatchQueue.main.asyncAfter(deadline: .now()) {
             LauncherPanel.shared.show()
         }
     }

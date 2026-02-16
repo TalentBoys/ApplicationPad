@@ -1,59 +1,59 @@
 //
 //  LauncherSettings.swift
-//  ApplicationPad
+//  LauncherCore
 //
 //  Created by Jin, Kris on 2026/2/10.
 //
 
 import Foundation
 
-struct LauncherSettings {
-    static var iconSize: CGFloat {
+public struct LauncherSettings {
+    public static var iconSize: CGFloat {
         get { CGFloat(UserDefaults.standard.double(forKey: "iconSize").nonZero ?? 112) }
         set { UserDefaults.standard.set(Double(newValue), forKey: "iconSize") }
     }
 
-    static var columnsCount: Int {
+    public static var columnsCount: Int {
         get { UserDefaults.standard.integer(forKey: "columnsCount").nonZero ?? 6 }
         set { UserDefaults.standard.set(newValue, forKey: "columnsCount") }
     }
 
-    static var rowsCount: Int {
+    public static var rowsCount: Int {
         get { UserDefaults.standard.integer(forKey: "rowsCount").nonZero ?? 5 }
         set { UserDefaults.standard.set(newValue, forKey: "rowsCount") }
     }
 
-    static var horizontalPadding: CGFloat {
+    public static var horizontalPadding: CGFloat {
         get { CGFloat(UserDefaults.standard.object(forKey: "horizontalPadding") as? Double ?? 120) }
         set { UserDefaults.standard.set(Double(newValue), forKey: "horizontalPadding") }
     }
 
-    static var topPadding: CGFloat {
+    public static var topPadding: CGFloat {
         get { CGFloat(UserDefaults.standard.object(forKey: "topPadding") as? Double ?? 30) }
         set { UserDefaults.standard.set(Double(newValue), forKey: "topPadding") }
     }
 
-    static var bottomPadding: CGFloat {
+    public static var bottomPadding: CGFloat {
         get { CGFloat(UserDefaults.standard.object(forKey: "bottomPadding") as? Double ?? 70) }
         set { UserDefaults.standard.set(Double(newValue), forKey: "bottomPadding") }
     }
 
-    static var invertScroll: Bool {
+    public static var invertScroll: Bool {
         get { UserDefaults.standard.bool(forKey: "invertScroll") }
         set { UserDefaults.standard.set(newValue, forKey: "invertScroll") }
     }
 
-    static var scrollSensitivity: CGFloat {
+    public static var scrollSensitivity: CGFloat {
         get { CGFloat(UserDefaults.standard.object(forKey: "scrollSensitivity") as? Double ?? 1.0) }
         set { UserDefaults.standard.set(Double(newValue), forKey: "scrollSensitivity") }
     }
 
-    static var lastPage: Int {
+    public static var lastPage: Int {
         get { UserDefaults.standard.integer(forKey: "lastPage") }
         set { UserDefaults.standard.set(newValue, forKey: "lastPage") }
     }
 
-    static var appsPerPage: Int {
+    public static var appsPerPage: Int {
         columnsCount * rowsCount
     }
 
@@ -103,14 +103,14 @@ struct LauncherSettings {
         }
     }
 
-    static func saveGridItems(_ items: [LauncherItem]) {
+    public static func saveGridItems(_ items: [LauncherItem]) {
         let data = items.map { LauncherItemData(from: $0) }
         if let encoded = try? JSONEncoder().encode(data) {
             UserDefaults.standard.set(encoded, forKey: gridItemsKey)
         }
     }
 
-    static func loadGridItems() -> [LauncherItem]? {
+    public static func loadGridItems() -> [LauncherItem]? {
         guard let data = UserDefaults.standard.data(forKey: gridItemsKey),
               let decoded = try? JSONDecoder().decode([LauncherItemData].self, from: data) else {
             return nil
@@ -118,7 +118,7 @@ struct LauncherSettings {
         return decoded.compactMap { $0.toLauncherItem() }
     }
 
-    static func applyCustomOrder(to apps: [AppItem]) -> [LauncherItem] {
+    public static func applyCustomOrder(to apps: [AppItem]) -> [LauncherItem] {
         // Try to load saved grid items first
         if let savedItems = loadGridItems() {
             var result: [LauncherItem] = []
@@ -163,7 +163,7 @@ struct LauncherSettings {
     }
 
     // Reset grid layout to default (clear all custom order and folders)
-    static func resetGridLayout() {
+    public static func resetGridLayout() {
         UserDefaults.standard.removeObject(forKey: gridItemsKey)
         UserDefaults.standard.removeObject(forKey: "customAppOrder")
         FolderIconCache.shared.clearCache()
@@ -171,24 +171,12 @@ struct LauncherSettings {
     }
 
     // Legacy support - keep old methods for compatibility
-    static var customAppOrder: [String] {
+    public static var customAppOrder: [String] {
         get { UserDefaults.standard.stringArray(forKey: "customAppOrder") ?? [] }
         set { UserDefaults.standard.set(newValue, forKey: "customAppOrder") }
     }
 
-    static func saveAppOrder(_ apps: [AppItem]) {
+    public static func saveAppOrder(_ apps: [AppItem]) {
         customAppOrder = apps.map { $0.url.path }
-    }
-}
-
-extension Double {
-    var nonZero: Double? {
-        self == 0 ? nil : self
-    }
-}
-
-extension Int {
-    var nonZero: Int? {
-        self == 0 ? nil : self
     }
 }
