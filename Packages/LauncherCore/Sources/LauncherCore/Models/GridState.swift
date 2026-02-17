@@ -87,6 +87,12 @@ public final class GridState: ObservableObject {
         hasChanges = false
     }
 
+    /// Set preview items directly (for HitTestFunctions)
+    public func setPreviewItems(_ items: [LauncherItem]) {
+        preview = items
+        hasChanges = true
+    }
+
     // MARK: - Preview Operations (all operate on preview)
 
     /// Reorder: move item from one index to another

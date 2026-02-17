@@ -40,13 +40,13 @@ public enum MergeDisplayState: Equatable, Sendable {
 public enum DragState: Equatable, Sendable {
     case idle
     case dragging
-    case reorderCandidate(targetIndex: Int)
-    case mergeHovering(targetId: UUID, startTime: Date)
-    case mergeReady(targetId: UUID)
+    case reorderCandidate(operation: DragOperation, targetCell: CellCoordinate)
+    case mergeHovering(targetId: UUID, targetCell: CellCoordinate, startTime: Date)
+    case mergeReady(targetId: UUID, targetCell: CellCoordinate)
 
     public var targetId: UUID? {
         switch self {
-        case .mergeHovering(let id, _), .mergeReady(let id):
+        case .mergeHovering(let id, _, _), .mergeReady(let id, _):
             return id
         default:
             return nil
@@ -73,31 +73,10 @@ public enum DragState: Equatable, Sendable {
 
 public enum DragEvent: Sendable {
     case startDrag
-    case enterMergeZone(targetId: UUID)
-    case enterReorderZone(targetIndex: Int)
-    case leaveTarget
+    case operationChanged(operation: DragOperation, targetCell: CellCoordinate?, targetId: UUID?, isFolder: Bool)
     case hoverTimerFired
     case highVelocityDetected
     case endDrag
-}
-
-// MARK: - Hit Zone
-
-public enum HitZone: Equatable, Sendable {
-    case none
-    case mergeZone(targetId: UUID, targetIndex: Int, isFolder: Bool)
-    case reorderZone(targetIndex: Int)
-}
-
-// MARK: - Reorder Info (for logging)
-
-public struct ReorderInfo: Sendable {
-    public let draggingName: String
-    public let draggingIndex: Int
-    public let draggingPosition: CGPoint
-    public let targetName: String
-    public let targetIndex: Int
-    public let targetCenter: CGPoint
 }
 
 // MARK: - Drag State Machine
@@ -107,6 +86,10 @@ public class DragStateMachine: ObservableObject {
     // Only publish merge-related states to minimize view updates
     @Published public private(set) var mergeState: MergeDisplayState = .none
 
+    // Current operation and target (for external use)
+    @Published public private(set) var currentOperation: DragOperation = .none
+    @Published public private(set) var currentTargetCell: CellCoordinate?
+
     // Internal state (not published)
     private var internalState: DragState = .idle
 
@@ -115,7 +98,6 @@ public class DragStateMachine: ObservableObject {
     // Configuration
     private let mergeHoverDuration: TimeInterval = 0.35  // Time to confirm merge
     private let folderOpenDelay: TimeInterval = 2.0      // Time to open folder when dragging over it
-    private let mergeZoneRatio: CGFloat = 1.0            // 100% icon area for merge
     private let velocityThreshold: CGFloat = 800        // pixels/second - fast = reorder
 
     // Internal state
@@ -126,15 +108,13 @@ public class DragStateMachine: ObservableObject {
     private var currentVelocity: CGFloat = 0
 
     // Throttling
-    private var lastHitZone: HitZone = .none
+    private var lastOperation: DragOperation = .none
+    private var lastTargetCell: CellCoordinate?
     private var lastUpdateTime: Date = .distantPast
     private let updateThrottleInterval: TimeInterval = 0.016 // ~60fps
 
-    // Reorder info cache (for logging)
-    private var pendingReorderInfo: ReorderInfo?
-
     // Callbacks
-    public var onReorder: ((Int) -> Void)?
+    public var onOperationChanged: ((DragOperation, CellCoordinate?, Int) -> Void)?  // operation, targetCell, sourceIndex
     public var onMergeReady: ((UUID) -> Void)?
     public var onFolderOpen: ((UUID) -> Void)?  // Called when folder should open during drag
 
@@ -147,25 +127,20 @@ public class DragStateMachine: ObservableObject {
         lastDragPosition = .zero
         lastDragTime = .now
         currentVelocity = 0
-        lastHitZone = .none
+        lastOperation = .none
+        lastTargetCell = nil
         lastUpdateTime = .distantPast
+        currentOperation = .none
+        currentTargetCell = nil
     }
 
     public func updateDrag(
         position: CGPoint,
         gridItems: [LauncherItem],
         draggingItemId: UUID,
-        cellWidth: CGFloat,
-        cellHeight: CGFloat,
-        iconSize: CGFloat,
-        columnsCount: Int,
-        rowsCount: Int,
-        horizontalPadding: CGFloat,
-        topPadding: CGFloat,
-        currentPage: Int,
-        appsPerPage: Int,
-        dragFromIndex: Int? = nil,  // Original index of dragging item
-        dragToIndex: Int? = nil     // Current visual target index
+        sourceIndex: Int,
+        layout: GridLayoutParams,
+        currentPage: Int
     ) {
         // Throttle updates
         let now = Date()
@@ -183,63 +158,112 @@ public class DragStateMachine: ObservableObject {
         lastDragPosition = position
         lastDragTime = now
 
-        // Determine hit zone
-        let hitZone = calculateHitZone(
+        // Step 1: Calculate hit position using pure function
+        let hitResult = calculateHitPosition(
             position: position,
-            gridItems: gridItems,
-            draggingItemId: draggingItemId,
-            cellWidth: cellWidth,
-            cellHeight: cellHeight,
-            iconSize: iconSize,
-            columnsCount: columnsCount,
-            rowsCount: rowsCount,
-            horizontalPadding: horizontalPadding,
-            topPadding: topPadding,
             currentPage: currentPage,
-            appsPerPage: appsPerPage,
-            dragFromIndex: dragFromIndex,
-            dragToIndex: dragToIndex
+            layout: layout
         )
 
-        // Skip if hit zone hasn't changed (for non-velocity-based transitions)
-        if hitZone == lastHitZone && currentVelocity < velocityThreshold {
+        // Step 2: Determine operation using pure function
+        let operation = determineOperation(
+            hitResult: hitResult,
+            items: gridItems,
+            draggingItemId: draggingItemId,
+            layout: layout
+        )
+
+        // Get target info for state transitions
+        let targetCell = hitResult.cell
+        var targetId: UUID? = nil
+        var isFolder = false
+
+        if let cell = targetCell {
+            let index = cell.toIndex(columnsCount: layout.columnsCount, appsPerPage: layout.appsPerPage)
+            if index < gridItems.count {
+                let targetItem = gridItems[index]
+                if !targetItem.isEmpty && targetItem.id != draggingItemId {
+                    targetId = targetItem.id
+                    if case .folder = targetItem {
+                        isFolder = true
+                    }
+                }
+            }
+        }
+
+        // Skip if operation and target haven't changed (unless high velocity)
+        if operation == lastOperation && targetCell == lastTargetCell && currentVelocity < velocityThreshold {
             return
         }
-        lastHitZone = hitZone
+        lastOperation = operation
+        lastTargetCell = targetCell
 
-        // Process hit zone
-        processHitZone(hitZone)
+        // Update published state
+        currentOperation = operation
+        currentTargetCell = targetCell
+
+        // High velocity always triggers reorder
+        if currentVelocity > velocityThreshold {
+            print("   ⚡ High velocity detected, forcing reorder")
+            transition(with: .highVelocityDetected)
+        }
+
+        // Process operation change
+        transition(with: .operationChanged(
+            operation: operation,
+            targetCell: targetCell,
+            targetId: targetId,
+            isFolder: isFolder
+        ))
+
+        // Notify callback for reorder operations
+        if case .reorderCandidate = internalState {
+            onOperationChanged?(operation, targetCell, sourceIndex)
+        }
     }
 
-    public func endDrag() -> (shouldMerge: Bool, targetId: UUID?) {
-        let result: (shouldMerge: Bool, targetId: UUID?)
+    public func endDrag() -> (shouldMerge: Bool, targetId: UUID?, targetCell: CellCoordinate?) {
+        let result: (shouldMerge: Bool, targetId: UUID?, targetCell: CellCoordinate?)
 
         print("🛑 endDrag called, current state=\(internalState)")
 
         switch internalState {
-        case .mergeReady(let targetId):
+        case .mergeReady(let targetId, let targetCell):
             print("   ✅ State is mergeReady, will merge with \(targetId.uuidString.prefix(8))")
-            result = (true, targetId)
-        case .mergeHovering(let targetId, let startTime):
+            result = (true, targetId, targetCell)
+        case .mergeHovering(let targetId, let targetCell, let startTime):
             // Check if user has been hovering long enough (at least half the required time)
-            // This allows merge even if user releases slightly before timer fires
             let elapsedTime = Date().timeIntervalSince(startTime)
-            let minimumHoverTime = mergeHoverDuration * 0.5  // 50% of required time
+            let minimumHoverTime = mergeHoverDuration * 0.5
             if elapsedTime >= minimumHoverTime {
-                print("   ✅ State is mergeHovering but elapsed time \(String(format: "%.2f", elapsedTime))s >= \(String(format: "%.2f", minimumHoverTime))s, will merge with \(targetId.uuidString.prefix(8))")
-                result = (true, targetId)
+                print("   ✅ State is mergeHovering but elapsed time \(String(format: "%.2f", elapsedTime))s >= \(String(format: "%.2f", minimumHoverTime))s, will merge")
+                result = (true, targetId, targetCell)
             } else {
-                print("   ❌ State is mergeHovering but elapsed time \(String(format: "%.2f", elapsedTime))s < \(String(format: "%.2f", minimumHoverTime))s, not long enough")
-                result = (false, nil)
+                print("   ❌ State is mergeHovering but elapsed time too short")
+                result = (false, nil, nil)
             }
         default:
             print("   ❌ State is NOT mergeReady")
-            result = (false, nil)
+            result = (false, nil, nil)
         }
 
         transition(with: .endDrag)
         cancelHoverTimer()
+        currentOperation = .none
+        currentTargetCell = nil
         return result
+    }
+
+    /// Get the current pending operation info (for applying on drop)
+    public func getPendingOperation() -> (operation: DragOperation, targetCell: CellCoordinate?)? {
+        switch internalState {
+        case .reorderCandidate(let operation, let targetCell):
+            return (operation, targetCell)
+        case .mergeReady(_, let targetCell):
+            return (.merge, targetCell)
+        default:
+            return nil
+        }
     }
 
     public func reset() {
@@ -248,249 +272,10 @@ public class DragStateMachine: ObservableObject {
         cancelHoverTimer()
         cancelFolderOpenTimer()
         currentVelocity = 0
-        lastHitZone = .none
-    }
-
-    // MARK: - Hit Zone Calculation
-
-    private func calculateHitZone(
-        position: CGPoint,
-        gridItems: [LauncherItem],
-        draggingItemId: UUID,
-        cellWidth: CGFloat,
-        cellHeight: CGFloat,
-        iconSize: CGFloat,
-        columnsCount: Int,
-        rowsCount: Int,
-        horizontalPadding: CGFloat,
-        topPadding: CGFloat,
-        currentPage: Int,
-        appsPerPage: Int,
-        dragFromIndex: Int? = nil,
-        dragToIndex: Int? = nil
-    ) -> HitZone {
-        // Clear pending reorder info
-        pendingReorderInfo = nil
-
-        // Calculate which cell we're over using floor for consistent behavior
-        let col = Int(floor((position.x - horizontalPadding) / cellWidth))
-        let row = Int(floor((position.y - topPadding) / cellHeight))
-
-        // Bounds check
-        guard col >= 0, col < columnsCount, row >= 0, row < rowsCount else {
-            return .none
-        }
-
-        let targetIndexInPage = row * columnsCount + col
-        let visualTargetIndex = currentPage * appsPerPage + targetIndexInPage
-
-        // Map visual position to actual array index, accounting for ongoing reorder
-        // If we're in the middle of a reorder (dragFromIndex != dragToIndex),
-        // the visual positions are different from array positions
-        let actualTargetIndex: Int
-        if let fromIndex = dragFromIndex, let toIndex = dragToIndex, fromIndex != toIndex {
-            // Map visual index back to array index
-            actualTargetIndex = mapVisualToArrayIndex(visualIndex: visualTargetIndex, fromIndex: fromIndex, toIndex: toIndex, totalItems: gridItems.count)
-        } else {
-            actualTargetIndex = visualTargetIndex
-        }
-
-        // Check if position is beyond current items but within grid bounds
-        // This allows dropping to empty cells at the end of the grid
-        if actualTargetIndex >= gridItems.count {
-            // Allow dropping to the end of the list (append position)
-            let maxValidIndex = gridItems.count  // Can drop at the end
-            if visualTargetIndex <= maxValidIndex {
-                return .reorderZone(targetIndex: visualTargetIndex)
-            }
-            return .none
-        }
-
-        let targetItem = gridItems[actualTargetIndex]
-
-        // Empty slots are valid drop targets for reorder
-        if targetItem.isEmpty {
-            return .reorderZone(targetIndex: visualTargetIndex)
-        }
-
-        // Don't target self
-        guard targetItem.id != draggingItemId else {
-            return .none
-        }
-
-        // Find dragging item and its current index
-        guard let draggingIndex = gridItems.firstIndex(where: { $0.id == draggingItemId }) else {
-            return .none
-        }
-        let draggingItem = gridItems[draggingIndex]
-
-        // Calculate icon center position (using visual position)
-        let iconCenterX = horizontalPadding + cellWidth * (CGFloat(col) + 0.5)
-        let iconCenterY = topPadding + cellHeight * (CGFloat(row) + 0.5)
-        let targetCenter = CGPoint(x: iconCenterX, y: iconCenterY)
-
-        // Calculate distance from icon center
-        let dx = position.x - iconCenterX
-        let dy = position.y - iconCenterY
-        let distanceFromCenter = hypot(dx, dy)
-
-        // Use circular zones for symmetric hit detection
-        let mergeRadius = iconSize * mergeZoneRatio / 2
-
-        if distanceFromCenter <= mergeRadius {
-            // Check if target is a folder
-            let isFolder: Bool
-            if case .folder = targetItem {
-                isFolder = true
-            } else {
-                isFolder = false
-            }
-            return .mergeZone(targetId: targetItem.id, targetIndex: actualTargetIndex, isFolder: isFolder)
-        }
-
-        // For reorder: check if drag position has fully exited the target cell
-        // This ensures reorder only triggers when truly moving past the target
-        //
-        // Key insight: reorder should only happen when the drag position is
-        // clearly outside the target's icon area, not just past the center.
-        let shouldTriggerReorder: Bool
-
-        // Check if we're outside the icon area (using cell boundaries for clearer separation)
-        let iconLeft = iconCenterX - iconSize / 2
-        let iconRight = iconCenterX + iconSize / 2
-        let iconTop = iconCenterY - iconSize / 2
-        let iconBottom = iconCenterY + iconSize / 2
-
-        // Determine if position is clearly outside the icon bounds
-        let isOutsideHorizontally = position.x < iconLeft || position.x > iconRight
-        let isOutsideVertically = position.y < iconTop || position.y > iconBottom
-
-        // Only trigger reorder if we're outside the icon area
-        if isOutsideHorizontally || isOutsideVertically {
-            // Check direction: should we swap with this target?
-            if position.x > iconRight {
-                // Position is right of target - reorder if target is before us
-                shouldTriggerReorder = draggingIndex < visualTargetIndex
-            } else if position.x < iconLeft {
-                // Position is left of target - reorder if target is after us
-                shouldTriggerReorder = draggingIndex > visualTargetIndex
-            } else if position.y > iconBottom {
-                // Position is below target (but within horizontal bounds)
-                // For same row movement, this means we're moving to next row
-                shouldTriggerReorder = draggingIndex < visualTargetIndex
-            } else if position.y < iconTop {
-                // Position is above target (but within horizontal bounds)
-                // For same row movement, this means we're moving to previous row
-                shouldTriggerReorder = draggingIndex > visualTargetIndex
-            } else {
-                shouldTriggerReorder = false
-            }
-        } else {
-            shouldTriggerReorder = false
-        }
-
-        if shouldTriggerReorder {
-            // Cache reorder info for logging when triggered
-            pendingReorderInfo = ReorderInfo(
-                draggingName: draggingItem.name,
-                draggingIndex: draggingIndex,
-                draggingPosition: position,
-                targetName: targetItem.name,
-                targetIndex: actualTargetIndex,
-                targetCenter: targetCenter
-            )
-            return .reorderZone(targetIndex: visualTargetIndex)  // Return visual index for reorder
-        }
-
-        return .none
-    }
-
-    // Helper function to map visual position to actual array index during drag
-    private func mapVisualToArrayIndex(visualIndex: Int, fromIndex: Int, toIndex: Int, totalItems: Int) -> Int {
-        // If visual position equals the target position, it shows the dragging item
-        if visualIndex == toIndex {
-            return fromIndex  // The dragging item is at fromIndex in the array
-        }
-
-        // For other positions, we need to reverse the visual shift
-        if fromIndex < toIndex {
-            // Dragging right: items between from+1..to have shifted left visually
-            // So visual position X corresponds to array position X+1 in that range
-            if visualIndex >= fromIndex && visualIndex < toIndex {
-                return visualIndex + 1
-            }
-        } else {
-            // Dragging left: items between to+1..from have shifted right visually
-            // So visual position X corresponds to array position X-1 in that range
-            if visualIndex > toIndex && visualIndex <= fromIndex {
-                return visualIndex - 1
-            }
-        }
-
-        // Outside the affected range, visual = actual
-        return visualIndex
-    }
-
-    // MARK: - Process Hit Zone
-
-    private func processHitZone(_ hitZone: HitZone) {
-        print("🎯 processHitZone: \(hitZone), velocity=\(String(format: "%.1f", currentVelocity)), state=\(state)")
-
-        // High velocity always triggers reorder
-        if currentVelocity > velocityThreshold {
-            print("   ⚡ High velocity detected, forcing reorder")
-            transition(with: .highVelocityDetected)
-
-            switch hitZone {
-            case .mergeZone(_, let index, _), .reorderZone(let index):
-                transition(with: .enterReorderZone(targetIndex: index))
-            case .none:
-                transition(with: .leaveTarget)
-            }
-            return
-        }
-
-        switch hitZone {
-        case .none:
-            transition(with: .leaveTarget)
-            cancelFolderOpenTimer()  // Cancel folder timer when leaving target
-
-        case .mergeZone(let targetId, _, let isFolder):
-            print("   📍 In merge zone for target \(targetId.uuidString.prefix(8)), isFolder=\(isFolder)")
-
-            // If target is a folder, immediately go to mergeReady (no hover delay needed)
-            if isFolder {
-                print("   📁 Target is folder, immediately ready to merge")
-                // Skip hovering state, go directly to mergeReady
-                if case .mergeReady(let currentTargetId) = state, currentTargetId == targetId {
-                    // Already ready for this target
-                    return
-                }
-                cancelHoverTimer()
-                internalState = .mergeReady(targetId: targetId)
-                updateMergeDisplayState()
-                onMergeReady?(targetId)
-
-                // Start folder open timer (2s delay to open folder)
-                startFolderOpenTimer(targetId: targetId)
-                return
-            }
-
-            // For app targets, use hover delay
-            // Check if we're already hovering over this target
-            if case .mergeHovering(let currentTargetId, _) = state, currentTargetId == targetId {
-                // Continue hovering, timer will handle transition to mergeReady
-                print("   ⏳ Already hovering, waiting for timer...")
-                return
-            }
-            print("   🆕 Starting hover on new target")
-            cancelFolderOpenTimer()  // Cancel folder timer when not hovering over folder
-            transition(with: .enterMergeZone(targetId: targetId))
-            startHoverTimer()
-
-        case .reorderZone(let targetIndex):
-            transition(with: .enterReorderZone(targetIndex: targetIndex))
-        }
+        lastOperation = .none
+        lastTargetCell = nil
+        currentOperation = .none
+        currentTargetCell = nil
     }
 
     // MARK: - State Transitions
@@ -507,9 +292,9 @@ public class DragStateMachine: ObservableObject {
     private func updateMergeDisplayState() {
         let newMergeState: MergeDisplayState
         switch internalState {
-        case .mergeHovering(let targetId, _):
+        case .mergeHovering(let targetId, _, _):
             newMergeState = .hovering(targetId: targetId)
-        case .mergeReady(let targetId):
+        case .mergeReady(let targetId, _):
             newMergeState = .ready(targetId: targetId)
         default:
             newMergeState = .none
@@ -521,13 +306,6 @@ public class DragStateMachine: ObservableObject {
         }
     }
 
-    private func triggerReorder(_ index: Int) {
-        if let info = pendingReorderInfo {
-            print("🔄 Reorder: [\(info.draggingName)][\(info.draggingIndex)] at (\(String(format: "%.1f", info.draggingPosition.x)), \(String(format: "%.1f", info.draggingPosition.y))) → [\(info.targetName)][\(info.targetIndex)] at (\(String(format: "%.1f", info.targetCenter.x)), \(String(format: "%.1f", info.targetCenter.y))) => newIndex=\(index)")
-        }
-        onReorder?(index)
-    }
-
     private func nextState(for event: DragEvent) -> DragState {
         switch (state, event) {
         // From idle
@@ -535,61 +313,86 @@ public class DragStateMachine: ObservableObject {
             return .dragging
 
         // From dragging
-        case (.dragging, .enterMergeZone(let targetId)):
-            return .mergeHovering(targetId: targetId, startTime: Date())
-        case (.dragging, .enterReorderZone(let index)):
-            triggerReorder(index)
-            return .reorderCandidate(targetIndex: index)
+        case (.dragging, .operationChanged(let op, let cell, let targetId, let isFolder)):
+            return handleOperationChange(op, cell: cell, targetId: targetId, isFolder: isFolder)
         case (.dragging, .endDrag):
             return .idle
 
         // From reorderCandidate
-        case (.reorderCandidate, .enterMergeZone(let targetId)):
-            return .mergeHovering(targetId: targetId, startTime: Date())
-        case (.reorderCandidate, .enterReorderZone(let index)):
-            triggerReorder(index)
-            return .reorderCandidate(targetIndex: index)
-        case (.reorderCandidate, .leaveTarget):
-            return .dragging
+        case (.reorderCandidate, .operationChanged(let op, let cell, let targetId, let isFolder)):
+            return handleOperationChange(op, cell: cell, targetId: targetId, isFolder: isFolder)
         case (.reorderCandidate, .endDrag):
             return .idle
 
         // From mergeHovering
-        case (.mergeHovering(let targetId, _), .hoverTimerFired):
+        case (.mergeHovering(let targetId, let cell, _), .hoverTimerFired):
             onMergeReady?(targetId)
-            return .mergeReady(targetId: targetId)
-        case (.mergeHovering, .enterReorderZone(let index)):
+            return .mergeReady(targetId: targetId, targetCell: cell)
+        case (.mergeHovering, .operationChanged(let op, let cell, let targetId, let isFolder)):
             cancelHoverTimer()
-            triggerReorder(index)
-            return .reorderCandidate(targetIndex: index)
-        case (.mergeHovering, .leaveTarget):
-            cancelHoverTimer()
-            return .dragging
+            return handleOperationChange(op, cell: cell, targetId: targetId, isFolder: isFolder)
         case (.mergeHovering, .highVelocityDetected):
             cancelHoverTimer()
             return .dragging
-        case (.mergeHovering(_, let startTime), .enterMergeZone(let newTargetId)):
-            // Switching to a different target
-            cancelHoverTimer()
-            return .mergeHovering(targetId: newTargetId, startTime: startTime)
         case (.mergeHovering, .endDrag):
             cancelHoverTimer()
             return .idle
 
         // From mergeReady
-        case (.mergeReady, .leaveTarget):
-            return .dragging
-        case (.mergeReady, .enterReorderZone(let index)):
-            triggerReorder(index)
-            return .reorderCandidate(targetIndex: index)
+        case (.mergeReady, .operationChanged(let op, let cell, let targetId, let isFolder)):
+            cancelFolderOpenTimer()
+            return handleOperationChange(op, cell: cell, targetId: targetId, isFolder: isFolder)
         case (.mergeReady, .highVelocityDetected):
+            cancelFolderOpenTimer()
             return .dragging
         case (.mergeReady, .endDrag):
+            cancelFolderOpenTimer()
             return .idle
 
         // Default - stay in current state
         default:
             return state
+        }
+    }
+
+    private func handleOperationChange(_ operation: DragOperation, cell: CellCoordinate?, targetId: UUID?, isFolder: Bool) -> DragState {
+        switch operation {
+        case .none:
+            cancelHoverTimer()
+            cancelFolderOpenTimer()
+            return .dragging
+
+        case .merge:
+            guard let targetId = targetId, let cell = cell else {
+                return .dragging
+            }
+
+            // If target is a folder, immediately go to mergeReady
+            if isFolder {
+                print("   📁 Target is folder, immediately ready to merge")
+                cancelHoverTimer()
+                onMergeReady?(targetId)
+                startFolderOpenTimer(targetId: targetId)
+                return .mergeReady(targetId: targetId, targetCell: cell)
+            }
+
+            // For app targets, check if we're already hovering over this target
+            if case .mergeHovering(let currentTargetId, _, _) = state, currentTargetId == targetId {
+                return state  // Continue hovering
+            }
+
+            // Start hovering on new target
+            cancelFolderOpenTimer()
+            startHoverTimer()
+            return .mergeHovering(targetId: targetId, targetCell: cell, startTime: Date())
+
+        case .placeInEmpty, .insertLeft, .insertRight, .insertAbove, .insertBelow:
+            guard let cell = cell else {
+                return .dragging
+            }
+            cancelHoverTimer()
+            cancelFolderOpenTimer()
+            return .reorderCandidate(operation: operation, targetCell: cell)
         }
     }
 

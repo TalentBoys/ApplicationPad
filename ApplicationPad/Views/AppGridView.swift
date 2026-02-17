@@ -567,47 +567,54 @@ struct AppGridView: View {
             dragEdgeStartTime = nil
         }
 
+        // Create layout params for state machine
+        let layout = GridLayoutParams(
+            columnsCount: columnsCount,
+            rowsCount: rowsCount,
+            appsPerPage: appsPerPage,
+            cellWidth: cellWidth,
+            cellHeight: cellHeight,
+            iconSize: iconSize,
+            horizontalPadding: horizontalPadding,
+            topPadding: topPadding
+        )
+
         // Use state machine for hit detection and state management
         dragStateMachine.updateDrag(
             position: CGPoint(x: dragX, y: dragY),
             gridItems: gridState.items,
             draggingItemId: dragging.id,
-            cellWidth: cellWidth,
-            cellHeight: cellHeight,
-            iconSize: iconSize,
-            columnsCount: columnsCount,
-            rowsCount: rowsCount,
-            horizontalPadding: horizontalPadding,
-            topPadding: topPadding,
-            currentPage: currentPage,
-            appsPerPage: appsPerPage,
-            dragFromIndex: currentIndex,
-            dragToIndex: currentIndex  // Now always same as currentIndex since we update immediately
+            sourceIndex: currentIndex,
+            layout: layout,
+            currentPage: currentPage
         )
     }
 
     private func setupStateMachineCallbacks(cellWidth: CGFloat, cellHeight: CGFloat) {
-        dragStateMachine.onReorder = { [self] targetIndex in
-            guard let currentIndex = dragCurrentIndex,
-                  targetIndex != currentIndex,
-                  targetIndex >= 0,
-                  targetIndex <= gridState.items.count else { return }
+        // Create layout params for callbacks
+        let layout = GridLayoutParams(
+            columnsCount: columnsCount,
+            rowsCount: rowsCount,
+            appsPerPage: appsPerPage,
+            cellWidth: cellWidth,
+            cellHeight: cellHeight,
+            iconSize: iconSize,
+            horizontalPadding: horizontalPadding,
+            topPadding: topPadding
+        )
 
-            // Check if target is an empty slot - use swap instead of reorder
-            let targetIsEmpty = targetIndex < gridState.items.count && gridState.items[targetIndex].isEmpty
+        dragStateMachine.onOperationChanged = { [self] operation, targetCell, sourceIndex in
+            guard targetCell != nil else { return }
 
-            if targetIsEmpty {
-                // Swap with empty slot
-                gridState.swap(index1: currentIndex, index2: targetIndex)
-                // Update current index to new position
-                dragCurrentIndex = targetIndex
-            } else {
-                // Normal reorder on preview
-                gridState.reorder(from: currentIndex, to: targetIndex)
-                // Update current index to new position
-                let newIndex = targetIndex > currentIndex ? targetIndex - 1 : targetIndex
-                dragCurrentIndex = newIndex
-            }
+            // Apply the operation to preview
+            // Note: sourceIndex is always the original position in stable, it never changes during drag
+            gridState.applyOperation(
+                operation: operation,
+                targetCell: targetCell,
+                sourceIndex: sourceIndex,
+                layout: layout
+            )
+            // Don't update dragCurrentIndex - it always refers to the original stable position
         }
 
         dragStateMachine.onMergeReady = { targetId in
@@ -723,7 +730,7 @@ struct AppGridView: View {
         }
 
         // Ask state machine if we should merge
-        let (shouldMerge, targetId) = dragStateMachine.endDrag()
+        let (shouldMerge, targetId, _) = dragStateMachine.endDrag()
 
         print("🔚 finishDragging: shouldMerge=\(shouldMerge), targetId=\(targetId?.uuidString.prefix(8) ?? "nil")")
         print("   dragCurrentIndex=\(dragCurrentIndex ?? -1), draggingItem=\(draggingItem?.name ?? "nil")")
