@@ -8,17 +8,9 @@
 import SwiftUI
 import LauncherCore
 
-// Helper to log AppScanner timing
-private func scanAppsWithTiming() -> [AppItem] {
-    TimingLogger.logWithTimestamp("      🔍 AppScanner.scan() START", since: TimingLogger.hotKeyPressedTime)
-    let result = AppScanner.scan()
-    TimingLogger.logWithTimestamp("      🔍 AppScanner.scan() END - found \(result.count) apps", since: TimingLogger.hotKeyPressedTime)
-    return result
-}
-
 struct AppGridView: View {
     @State private var searchText = ""
-    @State private var apps = scanAppsWithTiming()
+    @State private var apps = AppScanner.scan()
     @State private var keyMonitor = KeyEventMonitor()
     @State private var currentPage = LauncherSettings.lastPage
     @State private var dragOffset: CGFloat = 0
@@ -219,6 +211,8 @@ struct AppGridView: View {
                                                                 height: drag.startLocation.y - y
                                                             )
                                                             // Start preview mode: preview = stable
+                                                            gridState.setLayoutForLogging(columnsCount: columnsCount, rowsCount: rowsCount)
+                                                            gridState.enableLayoutLogging = true
                                                             gridState.startPreview()
                                                             dragStateMachine.startDrag()
                                                             setupStateMachineCallbacks(cellWidth: cellWidth, cellHeight: cellHeight)

@@ -8,17 +8,6 @@
 import Cocoa
 import Carbon
 
-// MARK: - Timing Logger
-struct TimingLogger {
-    static var hotKeyPressedTime: CFAbsoluteTime = 0
-
-    static func logWithTimestamp(_ message: String, since startTime: CFAbsoluteTime? = nil) {
-        let now = CFAbsoluteTimeGetCurrent()
-        let elapsed = startTime.map { String(format: "+%.3fms", (now - $0) * 1000) } ?? ""
-        print("⏱️ [\(String(format: "%.3f", now.truncatingRemainder(dividingBy: 1000)))] \(message) \(elapsed)")
-    }
-}
-
 final class HotKeyManager {
     static let shared = HotKeyManager()
     private var hotKeyRef: EventHotKeyRef?
@@ -57,10 +46,7 @@ final class HotKeyManager {
         InstallEventHandler(
             GetEventDispatcherTarget(),
             { _, _, _ in
-                TimingLogger.hotKeyPressedTime = CFAbsoluteTimeGetCurrent()
-                TimingLogger.logWithTimestamp("🔑 HotKey PRESSED (Carbon event received)")
                 DispatchQueue.main.async {
-                    TimingLogger.logWithTimestamp("🔑 HotKey callback executing on main queue", since: TimingLogger.hotKeyPressedTime)
                     HotKeyManager.callback?()
                 }
                 return noErr

@@ -187,7 +187,21 @@ extension GridState {
                 return nil
             }
             let targetIndex = cell.toIndex(columnsCount: layout.columnsCount, appsPerPage: layout.appsPerPage)
-            return applyInsertAt(sourceIndex: sourceIndex, targetIndex: targetIndex, layout: layout)
+            let isRowStart = cell.column == 0
+
+            if sourceIndex < targetIndex {
+                // Source before target: prefer squeeze left (use the empty slot left by source)
+                if isRowStart {
+                    // Row-start: target shifts forward, insert at targetIndex
+                    return applyInsertAt(sourceIndex: sourceIndex, targetIndex: targetIndex + 1, preferSqueezeLeft: true, layout: layout)
+                } else {
+                    // Not row-start: target stays, items before target shift left
+                    return applyInsertAt(sourceIndex: sourceIndex, targetIndex: targetIndex, preferSqueezeLeft: true, layout: layout)
+                }
+            } else {
+                // Source after target: prefer squeeze right (use the empty slot left by source)
+                return applyInsertAt(sourceIndex: sourceIndex, targetIndex: targetIndex, preferSqueezeLeft: false, layout: layout)
+            }
 
         case .insertRight:
             guard let cell = targetCell else {
@@ -195,7 +209,26 @@ extension GridState {
                 return nil
             }
             let targetIndex = cell.toIndex(columnsCount: layout.columnsCount, appsPerPage: layout.appsPerPage)
-            return applyInsertAt(sourceIndex: sourceIndex, targetIndex: targetIndex + 1, layout: layout)
+            let isRowEnd = cell.column == layout.columnsCount - 1
+
+            // insertRight means: place source to the RIGHT of target
+            // We need to find space WITHOUT moving the target itself
+            //
+            // Key insight: We should look for empty slot AFTER targetIndex first,
+            // because that's where we want to insert. Only if no empty after,
+            // then we shift items LEFT (including target) to make room.
+            if isRowEnd {
+                // Row-end special case: prefer squeeze left since there's no visual "right"
+                if sourceIndex < targetIndex {
+                    return applyInsertAt(sourceIndex: sourceIndex, targetIndex: targetIndex + 1, preferSqueezeLeft: true, layout: layout)
+                } else {
+                    return applyInsertAt(sourceIndex: sourceIndex, targetIndex: targetIndex, preferSqueezeLeft: false, layout: layout)
+                }
+            } else {
+                // Normal case: prefer squeeze right to keep target in place
+                // Only squeeze left if absolutely necessary (no empty after targetIndex+1)
+                return applyInsertAt(sourceIndex: sourceIndex, targetIndex: targetIndex + 1, preferSqueezeLeft: false, layout: layout)
+            }
 
         case .insertAbove:
             guard let cell = targetCell else {
@@ -205,10 +238,10 @@ extension GridState {
             let targetIndex = cell.toIndex(columnsCount: layout.columnsCount, appsPerPage: layout.appsPerPage)
             let insertIndex = targetIndex - layout.columnsCount
             if insertIndex >= 0 {
-                return applyInsertAt(sourceIndex: sourceIndex, targetIndex: insertIndex, layout: layout)
+                return applyInsertAt(sourceIndex: sourceIndex, targetIndex: insertIndex, preferSqueezeLeft: false, layout: layout)
             } else {
                 // Above first row - insert at beginning of page
-                return applyInsertAt(sourceIndex: sourceIndex, targetIndex: cell.page * layout.appsPerPage, layout: layout)
+                return applyInsertAt(sourceIndex: sourceIndex, targetIndex: cell.page * layout.appsPerPage, preferSqueezeLeft: false, layout: layout)
             }
 
         case .insertBelow:
@@ -218,7 +251,7 @@ extension GridState {
             }
             let targetIndex = cell.toIndex(columnsCount: layout.columnsCount, appsPerPage: layout.appsPerPage)
             let insertIndex = targetIndex + layout.columnsCount
-            return applyInsertAt(sourceIndex: sourceIndex, targetIndex: insertIndex, layout: layout)
+            return applyInsertAt(sourceIndex: sourceIndex, targetIndex: insertIndex, preferSqueezeLeft: false, layout: layout)
 
         case .merge:
             guard let cell = targetCell else {
@@ -256,9 +289,13 @@ extension GridState {
 
     /// Insert at position with cascading shift
     /// Always recalculates from stable state (sourceIndex is the original position in stable)
-    /// Logic: First try to find empty slot after targetIndex (shift right),
-    ///        if no empty slot after, try to find empty slot before targetIndex (shift left)
-    private func applyInsertAt(sourceIndex: Int, targetIndex: Int, layout: GridLayoutParams) -> Int? {
+    /// - Parameters:
+    ///   - sourceIndex: Original position in stable
+    ///   - targetIndex: Position to insert at
+    ///   - preferSqueezeLeft: If true, prefer shifting items left (used for insertRight to row-end)
+    ///   - layout: Grid layout parameters
+    /// - Returns: Final index where item was placed
+    private func applyInsertAt(sourceIndex: Int, targetIndex: Int, preferSqueezeLeft: Bool, layout: GridLayoutParams) -> Int? {
         // Always start from stable - each operation recalculates from stable
         var newPreview = stableItems
         guard sourceIndex >= 0 && sourceIndex < newPreview.count else { return nil }
@@ -268,11 +305,15 @@ extension GridState {
         // Step 1: Mark source as empty
         newPreview[sourceIndex] = .empty(UUID())
 
-        // Calculate page boundaries
-        let pageStart = 0 // For now, single page support
-        let pageEnd = newPreview.count
+        // Calculate page boundaries - IMPORTANT: limit search to current page only
+        // to prevent pushing items to next page when current page has space
+        let sourcePage = sourceIndex / layout.appsPerPage
+        let targetPage = min(targetIndex, newPreview.count - 1) / layout.appsPerPage
+        let currentPage = max(sourcePage, targetPage)
+        let pageStart = currentPage * layout.appsPerPage
+        let pageEnd = min((currentPage + 1) * layout.appsPerPage, newPreview.count)
 
-        // Step 2: Try to find empty slot from targetIndex onwards (within page)
+        // Step 2: Find empty slots in both directions (within current page)
         var emptySlotAfter: Int? = nil
         for i in targetIndex..<pageEnd {
             if newPreview[i].isEmpty {
@@ -281,49 +322,78 @@ extension GridState {
             }
         }
 
-        // Step 3: If no empty slot after, try to find empty slot before targetIndex
         var emptySlotBefore: Int? = nil
-        if emptySlotAfter == nil {
-            for i in stride(from: targetIndex - 1, through: pageStart, by: -1) {
-                if newPreview[i].isEmpty {
-                    emptySlotBefore = i
-                    break
-                }
+        for i in stride(from: targetIndex - 1, through: pageStart, by: -1) {
+            if newPreview[i].isEmpty {
+                emptySlotBefore = i
+                break
             }
         }
 
-        // Step 4: Apply the appropriate shift
+        // Step 3: Apply the appropriate shift based on preference and availability
         var finalTargetIndex: Int
 
-        if let emptyAfter = emptySlotAfter {
-            // Shift right: move items from emptySlotAfter back to targetIndex
-            var currentIndex = emptyAfter
-            while currentIndex > targetIndex && currentIndex > 0 {
-                newPreview[currentIndex] = newPreview[currentIndex - 1]
-                currentIndex -= 1
+        if preferSqueezeLeft {
+            // Prefer squeezing left first (for insertRight to row-end)
+            if let emptyBefore = emptySlotBefore {
+                // Shift left: move items from emptySlotBefore forward to targetIndex - 1
+                var currentIndex = emptyBefore
+                while currentIndex < targetIndex - 1 {
+                    newPreview[currentIndex] = newPreview[currentIndex + 1]
+                    currentIndex += 1
+                }
+                // Item goes at targetIndex - 1 (since we shifted left)
+                finalTargetIndex = targetIndex - 1
+            } else if let emptyAfter = emptySlotAfter {
+                // Fallback: shift right
+                var currentIndex = emptyAfter
+                while currentIndex > targetIndex && currentIndex > 0 {
+                    newPreview[currentIndex] = newPreview[currentIndex - 1]
+                    currentIndex -= 1
+                }
+                finalTargetIndex = targetIndex
+            } else {
+                // No empty slot found anywhere, need to add one and shift right
+                newPreview.append(.empty(UUID()))
+                var currentIndex = newPreview.count - 1
+                while currentIndex > targetIndex && currentIndex > 0 {
+                    newPreview[currentIndex] = newPreview[currentIndex - 1]
+                    currentIndex -= 1
+                }
+                finalTargetIndex = targetIndex
             }
-            finalTargetIndex = targetIndex
-        } else if let emptyBefore = emptySlotBefore {
-            // Shift left: move items from emptySlotBefore forward to targetIndex - 1
-            var currentIndex = emptyBefore
-            while currentIndex < targetIndex - 1 {
-                newPreview[currentIndex] = newPreview[currentIndex + 1]
-                currentIndex += 1
-            }
-            // Item goes at targetIndex - 1 (since we shifted left)
-            finalTargetIndex = targetIndex - 1
         } else {
-            // No empty slot found anywhere, need to add one and shift right
-            newPreview.append(.empty(UUID()))
-            var currentIndex = newPreview.count - 1
-            while currentIndex > targetIndex && currentIndex > 0 {
-                newPreview[currentIndex] = newPreview[currentIndex - 1]
-                currentIndex -= 1
+            // Default: prefer squeezing right first
+            if let emptyAfter = emptySlotAfter {
+                // Shift right: move items from emptySlotAfter back to targetIndex
+                var currentIndex = emptyAfter
+                while currentIndex > targetIndex && currentIndex > 0 {
+                    newPreview[currentIndex] = newPreview[currentIndex - 1]
+                    currentIndex -= 1
+                }
+                finalTargetIndex = targetIndex
+            } else if let emptyBefore = emptySlotBefore {
+                // Fallback: shift left
+                var currentIndex = emptyBefore
+                while currentIndex < targetIndex - 1 {
+                    newPreview[currentIndex] = newPreview[currentIndex + 1]
+                    currentIndex += 1
+                }
+                // Item goes at targetIndex - 1 (since we shifted left)
+                finalTargetIndex = targetIndex - 1
+            } else {
+                // No empty slot found anywhere, need to add one and shift right
+                newPreview.append(.empty(UUID()))
+                var currentIndex = newPreview.count - 1
+                while currentIndex > targetIndex && currentIndex > 0 {
+                    newPreview[currentIndex] = newPreview[currentIndex - 1]
+                    currentIndex -= 1
+                }
+                finalTargetIndex = targetIndex
             }
-            finalTargetIndex = targetIndex
         }
 
-        // Step 5: Place the source item at final target
+        // Step 4: Place the source item at final target
         finalTargetIndex = min(finalTargetIndex, newPreview.count - 1)
         finalTargetIndex = max(finalTargetIndex, 0)
         newPreview[finalTargetIndex] = sourceItem

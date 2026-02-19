@@ -42,22 +42,12 @@ class LauncherPanel: NSPanel {
     }
 
     private func updateContent() {
-        TimingLogger.logWithTimestamp("  📦 updateContent() - creating LauncherContentView...", since: TimingLogger.hotKeyPressedTime)
         let contentView = LauncherContentView()
-        TimingLogger.logWithTimestamp("  📦 updateContent() - LauncherContentView created", since: TimingLogger.hotKeyPressedTime)
-
-        TimingLogger.logWithTimestamp("  📦 updateContent() - creating NSHostingView...", since: TimingLogger.hotKeyPressedTime)
         let hostingView = NSHostingView(rootView: contentView)
-        TimingLogger.logWithTimestamp("  📦 updateContent() - NSHostingView created", since: TimingLogger.hotKeyPressedTime)
-
-        TimingLogger.logWithTimestamp("  📦 updateContent() - assigning contentView...", since: TimingLogger.hotKeyPressedTime)
         self.contentView = hostingView
-        IconCache.shared.logStats()
-        TimingLogger.logWithTimestamp("  📦 updateContent() - done", since: TimingLogger.hotKeyPressedTime)
     }
 
     func toggle() {
-        TimingLogger.logWithTimestamp("🔄 toggle() called - isVisible: \(isVisible), isAnimating: \(isAnimating)", since: TimingLogger.hotKeyPressedTime)
         if isVisible && !isAnimating {
             close()
         } else if !isVisible && !isAnimating {
@@ -66,11 +56,7 @@ class LauncherPanel: NSPanel {
     }
 
     func show() {
-        TimingLogger.logWithTimestamp("📤 show() START", since: TimingLogger.hotKeyPressedTime)
-        guard !isAnimating else {
-            TimingLogger.logWithTimestamp("⚠️ show() BLOCKED - already animating")
-            return
-        }
+        guard !isAnimating else { return }
         isAnimating = true
 
         if let screen = NSScreen.main {
@@ -78,54 +64,36 @@ class LauncherPanel: NSPanel {
         }
         // Reset to invisible state before showing
         LauncherAnimationState.shared.isContentVisible = false
-        TimingLogger.logWithTimestamp("📤 show() - contentVisible set to false", since: TimingLogger.hotKeyPressedTime)
-
-        // 不要每次都重建视图！只在首次或需要时创建
-        // updateContent()
-        // TimingLogger.logWithTimestamp("📤 show() - updateContent() done", since: TimingLogger.hotKeyPressedTime)
 
         NSApp.activate(ignoringOtherApps: true)
         makeKeyAndOrderFront(nil)
-        TimingLogger.logWithTimestamp("📤 show() - window made key and front", since: TimingLogger.hotKeyPressedTime)
 
         startGlobalClickMonitor()
 
         // Trigger fade-in animation
-        TimingLogger.logWithTimestamp("📤 show() - scheduling animation after 0.02s", since: TimingLogger.hotKeyPressedTime)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
-            TimingLogger.logWithTimestamp("✨ show() - animation block executing", since: TimingLogger.hotKeyPressedTime)
             withAnimation(.easeOut(duration: 0.2)) {
                 LauncherAnimationState.shared.isContentVisible = true
-                TimingLogger.logWithTimestamp("✨ show() - contentVisible set to true (0.2s animation started)", since: TimingLogger.hotKeyPressedTime)
             }
             self.isAnimating = false
-            TimingLogger.logWithTimestamp("📤 show() END - isAnimating = false", since: TimingLogger.hotKeyPressedTime)
         }
     }
 
     override func close() {
-        TimingLogger.logWithTimestamp("📥 close() START", since: TimingLogger.hotKeyPressedTime)
-        guard !isAnimating else {
-            TimingLogger.logWithTimestamp("⚠️ close() BLOCKED - already animating")
-            return
-        }
+        guard !isAnimating else { return }
         isAnimating = true
 
         stopGlobalClickMonitor()
 
         // Trigger fade-out animation
-        TimingLogger.logWithTimestamp("✨ close() - starting fade-out animation (0.2s)", since: TimingLogger.hotKeyPressedTime)
         withAnimation(.easeOut(duration: 0.2)) {
             LauncherAnimationState.shared.isContentVisible = false
         }
 
         // Wait for animation to complete before hiding window
-        TimingLogger.logWithTimestamp("📥 close() - scheduling orderOut after 0.25s", since: TimingLogger.hotKeyPressedTime)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-            TimingLogger.logWithTimestamp("📥 close() - orderOut executing", since: TimingLogger.hotKeyPressedTime)
             self.orderOut(nil)
             self.isAnimating = false
-            TimingLogger.logWithTimestamp("📥 close() END - window hidden", since: TimingLogger.hotKeyPressedTime)
         }
     }
 
@@ -164,12 +132,7 @@ class LauncherPanel: NSPanel {
 struct LauncherContentView: View {
     @ObservedObject private var animationState = LauncherAnimationState.shared
 
-    init() {
-        TimingLogger.logWithTimestamp("    🎨 LauncherContentView.init()", since: TimingLogger.hotKeyPressedTime)
-    }
-
     var body: some View {
-        let _ = TimingLogger.logWithTimestamp("    🎨 LauncherContentView.body evaluating", since: TimingLogger.hotKeyPressedTime)
         AppGridView()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(VisualEffectView())

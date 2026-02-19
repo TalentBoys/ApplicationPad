@@ -27,6 +27,15 @@ public final class GridState: ObservableObject {
     /// Track if any changes were made during this drag session
     private var hasChanges: Bool = false
 
+    /// Current layout columns count for logging (set via setLayoutForLogging)
+    private var logColumnsCount: Int = 6
+
+    /// Current layout rows count for logging (set via setLayoutForLogging)
+    private var logRowsCount: Int = 5
+
+    /// Enable/disable layout logging
+    public var enableLayoutLogging: Bool = false
+
     public init(items: [LauncherItem] = []) {
         self.stable = items
         self.preview = nil
@@ -54,6 +63,70 @@ public final class GridState: ObservableObject {
         hasChanges
     }
 
+    // MARK: - Layout Logging
+
+    /// Set layout params for logging purposes
+    public func setLayoutForLogging(columnsCount: Int, rowsCount: Int) {
+        self.logColumnsCount = columnsCount
+        self.logRowsCount = rowsCount
+    }
+
+    /// Format items as a 2D grid string, separated by pages
+    private func formatGridLayout(_ items: [LauncherItem], columnsCount: Int, rowsCount: Int) -> String {
+        guard !items.isEmpty else { return "(empty grid)" }
+
+        let appsPerPage = columnsCount * rowsCount
+        let totalPages = max(1, Int(ceil(Double(items.count) / Double(appsPerPage))))
+
+        var pageStrings: [String] = []
+
+        for page in 0..<totalPages {
+            let pageStart = page * appsPerPage
+            let pageEnd = min(pageStart + appsPerPage, items.count)
+
+            var lines: [String] = []
+            lines.append("--- Page \(page) ---")
+
+            for row in 0..<rowsCount {
+                var rowItems: [String] = []
+                for col in 0..<columnsCount {
+                    let index = pageStart + row * columnsCount + col
+                    let name: String
+                    if index < pageEnd {
+                        let item = items[index]
+                        switch item {
+                        case .app(let app):
+                            name = app.name
+                        case .folder(let folder):
+                            name = "[\(folder.name)]"
+                        case .empty:
+                            name = "·"
+                        }
+                    } else {
+                        name = ""  // Beyond array bounds
+                    }
+                    // Pad to 6 characters for alignment
+                    let padded = name.padding(toLength: 6, withPad: " ", startingAt: 0)
+                    rowItems.append(padded)
+                }
+                lines.append(rowItems.joined(separator: " "))
+            }
+
+            pageStrings.append(lines.joined(separator: "\n"))
+        }
+
+        return pageStrings.joined(separator: "\n\n")
+    }
+
+    /// Log current layout state
+    private func logLayout(label: String) {
+        guard enableLayoutLogging else { return }
+
+        let currentItems = preview ?? stable
+        let layoutStr = formatGridLayout(currentItems, columnsCount: logColumnsCount, rowsCount: logRowsCount)
+        print("📊 \(label):\n\(layoutStr)\n")
+    }
+
     // MARK: - State Management
 
     /// Update stable state directly (for non-drag operations like initial load)
@@ -68,6 +141,7 @@ public final class GridState: ObservableObject {
     public func startPreview() {
         preview = stable
         hasChanges = false
+        logLayout(label: "Preview Started (from stable)")
     }
 
     /// Commit preview to stable
@@ -78,6 +152,7 @@ public final class GridState: ObservableObject {
         }
         preview = nil
         hasChanges = false
+        logLayout(label: "Committed to Stable")
     }
 
     /// Cancel preview and revert to stable
@@ -85,12 +160,14 @@ public final class GridState: ObservableObject {
     public func cancelPreview() {
         preview = nil
         hasChanges = false
+        logLayout(label: "Preview Cancelled (reverted to stable)")
     }
 
     /// Set preview items directly (for HitTestFunctions)
     public func setPreviewItems(_ items: [LauncherItem]) {
         preview = items
         hasChanges = true
+        logLayout(label: "Preview Updated")
     }
 
     // MARK: - Preview Operations (all operate on preview)
