@@ -473,7 +473,7 @@ struct AppGridView: View {
     }
 
     private func handleDragOutOfFolder(app: AppItem, dragPosition: CGPoint, folder: FolderItem, geo: GeometryProxy) {
-        print("📤 App dragged out of folder: \(app.name) at position \(dragPosition)")
+        print("📤 App dragged out of folder: \(app.name) at screen position \(dragPosition)")
 
         // Remove app from folder
         var updatedFolder = folder
@@ -501,18 +501,29 @@ struct AppGridView: View {
             openFolder = nil
         }
 
-        // Calculate cell dimensions for main grid
-        let screenHeight = geo.size.height
+        // Calculate grid area offset from screen top
+        // The grid is below: notch + search bar
         let notchHeight: CGFloat = 50
         let searchHeight: CGFloat = 60
+
+        // Convert screen coordinates to grid-local coordinates
+        // dragPosition is in screen coordinates (0,0 at top-left of screen)
+        // Grid overlay is positioned relative to the grid area (below notch + search)
+        let gridLocalX = dragPosition.x
+        let gridLocalY = dragPosition.y - notchHeight - searchHeight
+
+        print("📤 Converted to grid-local position: (\(gridLocalX), \(gridLocalY))")
+
+        // Calculate cell dimensions for main grid
+        let screenHeight = geo.size.height
         let pageIndicatorHeight: CGFloat = totalPages > 1 ? 50 : 0
         let availableHeight = screenHeight - notchHeight - searchHeight - pageIndicatorHeight - topPadding - bottomPadding
         let cellWidth = (geo.size.width - horizontalPadding * 2) / CGFloat(columnsCount)
         let cellHeight = (availableHeight + topPadding + bottomPadding - topPadding - bottomPadding) / CGFloat(rowsCount)
 
-        // Calculate grid position from drag position
-        let col = Int(floor((dragPosition.x - horizontalPadding) / cellWidth))
-        let row = Int(floor((dragPosition.y - notchHeight - searchHeight - topPadding) / cellHeight))
+        // Calculate grid position from grid-local position
+        let col = Int(floor((gridLocalX - horizontalPadding) / cellWidth))
+        let row = Int(floor((gridLocalY - topPadding) / cellHeight))
 
         // Calculate target index
         let validCol = max(0, min(col, columnsCount - 1))
@@ -521,8 +532,9 @@ struct AppGridView: View {
         let targetIndex = currentPage * appsPerPage + targetIndexInPage
 
         // Start dragging the app in the main grid
+        // Use grid-local coordinates for dragStartPosition (matches overlay coordinate system)
         draggingItem = .app(app)
-        dragStartPosition = dragPosition  // This is the mouse position
+        dragStartPosition = CGPoint(x: gridLocalX, y: gridLocalY)
         draggingOffset = .zero
         dragAccumulatedOffset = .zero
         dragMouseOffset = .zero

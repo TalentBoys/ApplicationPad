@@ -308,25 +308,34 @@ extension GridState {
         // Calculate page boundaries - IMPORTANT: limit search to current page only
         // to prevent pushing items to next page when current page has space
         let sourcePage = sourceIndex / layout.appsPerPage
-        let targetPage = min(targetIndex, newPreview.count - 1) / layout.appsPerPage
+        let clampedTargetIndex = min(targetIndex, newPreview.count - 1)
+        let targetPage = clampedTargetIndex / layout.appsPerPage
         let currentPage = max(sourcePage, targetPage)
         let pageStart = currentPage * layout.appsPerPage
         let pageEnd = min((currentPage + 1) * layout.appsPerPage, newPreview.count)
 
+        // Clamp targetIndex to valid range for this page
+        let searchStartAfter = min(targetIndex, pageEnd)
+        let searchStartBefore = min(targetIndex - 1, pageEnd - 1)
+
         // Step 2: Find empty slots in both directions (within current page)
         var emptySlotAfter: Int? = nil
-        for i in targetIndex..<pageEnd {
-            if newPreview[i].isEmpty {
-                emptySlotAfter = i
-                break
+        if searchStartAfter < pageEnd {
+            for i in searchStartAfter..<pageEnd {
+                if newPreview[i].isEmpty {
+                    emptySlotAfter = i
+                    break
+                }
             }
         }
 
         var emptySlotBefore: Int? = nil
-        for i in stride(from: targetIndex - 1, through: pageStart, by: -1) {
-            if newPreview[i].isEmpty {
-                emptySlotBefore = i
-                break
+        if searchStartBefore >= pageStart {
+            for i in stride(from: searchStartBefore, through: pageStart, by: -1) {
+                if newPreview[i].isEmpty {
+                    emptySlotBefore = i
+                    break
+                }
             }
         }
 
