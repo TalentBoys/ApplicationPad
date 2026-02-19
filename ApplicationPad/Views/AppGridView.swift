@@ -619,6 +619,11 @@ struct AppGridView: View {
         let isNearRightEdge = localX > pageWidth - edgeThreshold && currentPage < totalPages - 1
         let isNearEdge = isNearLeftEdge || isNearRightEdge
 
+        // Debug log for edge detection
+        if isNearEdge || dragEdgePageChanged {
+            print("🔄 Edge: localX=\(Int(localX)), pageWidth=\(Int(pageWidth)), isNearEdge=\(isNearEdge), dragEdgePageChanged=\(dragEdgePageChanged), page=\(currentPage)")
+        }
+
         if isNearEdge {
             let now = Date()
 
@@ -631,9 +636,11 @@ struct AppGridView: View {
                 dragEdgeStartTime = now
                 shouldChangePage = true
                 pageDirection = isNearLeftEdge ? -1 : 1
+                print("🔄 First edge touch, will change page: \(pageDirection)")
             } else if let startTime = dragEdgeStartTime {
                 // Already changed page, check if delay has passed for auto-repeat
-                if now.timeIntervalSince(startTime) >= edgeRepeatDelay {
+                let elapsed = now.timeIntervalSince(startTime)
+                if elapsed >= edgeRepeatDelay {
                     // Reset for another page change
                     dragEdgeStartTime = now
                     shouldChangePage = true
@@ -642,6 +649,7 @@ struct AppGridView: View {
                     } else if isNearRightEdge && currentPage < totalPages - 1 {
                         pageDirection = 1
                     }
+                    print("🔄 Edge delay passed (\(elapsed)s), will change page: \(pageDirection)")
                 }
             }
 
@@ -655,9 +663,13 @@ struct AppGridView: View {
                 withAnimation(.easeInOut(duration: 0.3)) {
                     currentPage = newPage
                 }
+                print("🔄 Page changed to \(newPage)")
             }
         } else {
             // Not near edge - reset flags to allow next edge trigger
+            if dragEdgePageChanged {
+                print("🔄 Left edge zone, resetting dragEdgePageChanged")
+            }
             dragEdgePageChanged = false
             dragEdgeStartTime = nil
         }
