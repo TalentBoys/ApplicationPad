@@ -1040,13 +1040,13 @@ struct FolderOverlayView: View {
     @State private var dragCurrentIndex: Int?  // Index in stable (never changes during drag)
     @State private var folderDragAccumulatedOffset: CGFloat = 0  // Compensate for page changes
     @State private var folderDragMouseOffset: CGSize = .zero  // Mouse click position relative to icon center
+    @State private var folderDragStartPage: Int = 0  // Page where drag started
 
     // Track external drag position inside folder
     @State private var externalDragTargetIndex: Int?
 
     // Edge drag state for page change within folder
-    @State private var folderEdgePageChanged: Bool = false
-    @State private var folderEdgeStartTime: Date? = nil
+    @State private var folderEdgeStartTime: Date? = nil  // Cooldown timer for page changes
 
     // Debug: mouse position tracking
     @State private var debugMousePosition: CGPoint = .zero
@@ -1136,10 +1136,10 @@ struct FolderOverlayView: View {
         draggingOffset = .zero
         dragStartPosition = .zero
         dragCurrentIndex = nil
-        folderEdgePageChanged = false
         folderEdgeStartTime = nil
         folderDragAccumulatedOffset = 0
         folderDragMouseOffset = .zero
+        folderDragStartPage = 0
     }
 
     /// Handle folder drag position update (edge detection, outside detection, apply operation)
@@ -1167,52 +1167,52 @@ struct FolderOverlayView: View {
         let rightZoneStart = folderRightEdge
         let rightZoneEnd = folderRightEdge + edgeWidth
 
-        // Adjust dragX for accumulated offset from page changes
-        let adjustedDragX = dragX + folderDragAccumulatedOffset
-
-        let isNearLeftEdge = adjustedDragX >= leftZoneStart && adjustedDragX <= leftZoneEnd && currentPage > 0
-        let isNearRightEdge = adjustedDragX >= rightZoneStart && adjustedDragX <= rightZoneEnd && currentPage < totalPages - 1
+        // dragX is already the screen position (compensated for page changes in caller)
+        // No need to add folderDragAccumulatedOffset here
+        let isNearLeftEdge = dragX >= leftZoneStart && dragX <= leftZoneEnd && currentPage > 0
+        let isNearRightEdge = dragX >= rightZoneStart && dragX <= rightZoneEnd && currentPage < totalPages - 1
         let isNearEdge = isNearLeftEdge || isNearRightEdge
 
         if isNearEdge {
             let now = Date()
             let edgeRepeatDelay: TimeInterval = 2.0
-
             var shouldChangePage = false
             var pageDirection: Int = 0
 
-            if !folderEdgePageChanged {
-                folderEdgePageChanged = true
-                folderEdgeStartTime = now
+            // Simple cooldown logic: check if 2s has passed since last page change
+            if let lastChangeTime = folderEdgeStartTime {
+                let elapsed = now.timeIntervalSince(lastChangeTime)
+                if elapsed >= edgeRepeatDelay {
+                    shouldChangePage = true
+                    pageDirection = isNearLeftEdge ? -1 : 1
+                    print("📁 Folder: Cooldown passed (\(String(format: "%.1f", elapsed))s), will change page: \(pageDirection)")
+                }
+            } else {
+                // First page change during this drag - allow immediately
                 shouldChangePage = true
                 pageDirection = isNearLeftEdge ? -1 : 1
-            } else if let startTime = folderEdgeStartTime {
-                if now.timeIntervalSince(startTime) >= edgeRepeatDelay {
-                    folderEdgeStartTime = now
-                    shouldChangePage = true
-                    if isNearLeftEdge && currentPage > 0 {
-                        pageDirection = -1
-                    } else if isNearRightEdge && currentPage < totalPages - 1 {
-                        pageDirection = 1
-                    }
-                }
+                print("📁 Folder: First edge touch, will change page: \(pageDirection)")
             }
 
             if shouldChangePage && pageDirection != 0 {
+                // Record this page change time for cooldown
+                folderEdgeStartTime = now
+
+                // Update accumulated offset to compensate for page change
                 folderDragAccumulatedOffset -= CGFloat(pageDirection) * contentWidth
 
                 withAnimation(.easeInOut(duration: 0.3)) {
                     currentPage += pageDirection
                 }
+                print("📁 Folder: Page changed to \(currentPage)")
             }
-        } else {
-            folderEdgePageChanged = false
-            folderEdgeStartTime = nil
         }
+        // Note: We never reset folderEdgeStartTime until drag ends
+        // This ensures 2s cooldown regardless of cursor position
 
         // Check if dragged outside folder bounds
-        let isOutside = adjustedDragX < leftZoneStart ||
-                       adjustedDragX > rightZoneEnd ||
+        let isOutside = dragX < leftZoneStart ||
+                       dragX > rightZoneEnd ||
                        dragY < -folderPadding / 2 - titleHeight ||
                        dragY > contentHeight + folderPadding / 2
 
@@ -1251,7 +1251,7 @@ struct FolderOverlayView: View {
         )
 
         let hitResult = calculateHitPosition(
-            position: CGPoint(x: adjustedDragX, y: dragY),
+            position: CGPoint(x: dragX, y: dragY),
             currentPage: currentPage,
             layout: layout
         )
@@ -1271,9 +1271,9 @@ struct FolderOverlayView: View {
         // Apply the operation to preview
         if operation != .none, let cell = hitResult.cell {
             let targetIndex = cell.toIndex(columnsCount: folderColumns, appsPerPage: appsPerPage)
-            print("📁 Folder drag: operation=\(operation), sourceIndex=\(sourceIndex), targetIndex=\(targetIndex)")
-            print("   Preview before: \(folderGridState.items.map { $0.name })")
+            print("📁 Folder drag: operation=\(operation), sourceIndex=\(sourceIndex), targetIndex=\(targetIndex), page=\(currentPage)")
 
+            let beforeItems = folderGridState.items
             folderGridState.applyOperation(
                 operation: operation,
                 targetCell: hitResult.cell,
@@ -1281,40 +1281,40 @@ struct FolderOverlayView: View {
                 layout: layout
             )
 
-            print("   Preview after: \(folderGridState.items.map { $0.name })")
-            print("   previewHasChanges: \(folderGridState.previewHasChanges)")
+            logFolderItems(label: "Before", items: beforeItems, cellWidth: cellWidth, cellHeight: cellHeight)
+            logFolderItems(label: "After", items: folderGridState.items, cellWidth: cellWidth, cellHeight: cellHeight)
         }
     }
 
     /// Log folder layout as 2D grid (all pages) with UI parameters
     private func logFolderLayout(label: String, contentWidth: CGFloat, contentHeight: CGFloat, cellWidth: CGFloat, cellHeight: CGFloat) {
-        // Build the visual layout based on current state
         let displayItems = folderGridState.items.isEmpty ? folder.slots : folderGridState.items
+        logFolderItems(label: label, items: displayItems, cellWidth: cellWidth, cellHeight: cellHeight)
+    }
 
-        // Format as 2D grid with pages
+    /// Log folder items as 2D grid (all pages)
+    private func logFolderItems(label: String, items: [LauncherItem], cellWidth: CGFloat, cellHeight: CGFloat) {
+        let itemsPerPage = folderRows * folderColumns
+        let pages = max(1, Int(ceil(Double(items.count) / Double(itemsPerPage))))
+
         var lines: [String] = []
-        lines.append("📁 [\(label)] Folder '\(folder.name)'")
-        lines.append("  Grid: \(folderColumns)x\(folderRows), \(totalPages) pages, \(displayItems.count) items")
-        lines.append("  UI: contentSize=\(Int(contentWidth))x\(Int(contentHeight)), cellSize=\(Int(cellWidth))x\(Int(cellHeight))")
+        lines.append("📁 [\(label)] Folder '\(folder.name)' (\(items.count) items)")
 
-        for page in 0..<totalPages {
-            if totalPages > 1 {
+        for page in 0..<pages {
+            if pages > 1 {
                 lines.append("  --- Page \(page) ---")
             }
-            let pageStart = page * appsPerPage
+            let pageStart = page * itemsPerPage
 
             for row in 0..<folderRows {
                 var rowItems: [String] = []
                 for col in 0..<folderColumns {
                     let index = pageStart + row * folderColumns + col
-                    if index < displayItems.count {
-                        let item = displayItems[index]
+                    if index < items.count {
+                        let item = items[index]
                         let isDragging = draggingItem?.id == item.id
-                        // Show position info: name(x,y)
-                        let x = Int(cellWidth * (CGFloat(col) + 0.5))
-                        let y = Int(cellHeight * (CGFloat(row) + 0.5))
                         let name = String(item.name.prefix(6))
-                        let posInfo = item.isEmpty ? "·" : "\(name)(\(x),\(y))"
+                        let posInfo = item.isEmpty ? "·" : name
                         rowItems.append(isDragging ? "[\(posInfo)]" : posInfo)
                     } else {
                         rowItems.append("·")
@@ -1386,9 +1386,9 @@ struct FolderOverlayView: View {
 
                     Spacer().frame(height: 12)
 
-                    // Paginated apps grid - wrapped in a container with leading alignment
-                    // to prevent centering when HStack is wider than container
-                    Group {
+                    // Paginated apps grid - wrapped in a ZStack so dragging overlay is outside page offset
+                    ZStack {
+                        // Page content (scrolls with page changes)
                         HStack(spacing: 0) {
                             ForEach(0..<totalPages, id: \.self) { page in
                             // Grid for each page - use ZStack with position like launcher
@@ -1439,6 +1439,8 @@ struct FolderOverlayView: View {
                                                             dragCurrentIndex = globalIndex
                                                             dragStartPosition = CGPoint(x: x, y: y)
                                                             folderDragAccumulatedOffset = 0
+                                                            folderDragStartPage = currentPage  // Remember which page we started on
+                                                            folderEdgeStartTime = nil  // Reset cooldown for new drag
                                                             // Record mouse click offset relative to icon center
                                                             folderDragMouseOffset = CGSize(
                                                                 width: drag.startLocation.x - x,
@@ -1451,20 +1453,23 @@ struct FolderOverlayView: View {
                                                         }
 
                                                         if draggingItem != nil {
-                                                            // Apply accumulated offset and mouse offset
+                                                            // Apply accumulated offset and mouse offset to keep icon attached to cursor
+                                                            // folderDragAccumulatedOffset compensates for page changes
                                                             draggingOffset = CGSize(
                                                                 width: drag.translation.width + folderDragAccumulatedOffset + folderDragMouseOffset.width,
                                                                 height: drag.translation.height + folderDragMouseOffset.height
                                                             )
 
-                                                            // Calculate drag position in folder local coordinates
-                                                            let dragX = dragStartPosition.x + drag.translation.width + folderDragMouseOffset.width
-                                                            let dragY = dragStartPosition.y + drag.translation.height + folderDragMouseOffset.height
+                                                            // Calculate screen position for hit testing
+                                                            // This needs to compensate for page changes to map to correct cell
+                                                            let pageOffset = CGFloat(currentPage - folderDragStartPage) * contentWidth
+                                                            let screenX = dragStartPosition.x + drag.translation.width + folderDragMouseOffset.width - pageOffset
+                                                            let screenY = dragStartPosition.y + drag.translation.height + folderDragMouseOffset.height
 
                                                             // Update drag position (handles edge detection, outside detection, and operation)
                                                             updateFolderDragPosition(
-                                                                dragX: dragX,
-                                                                dragY: dragY,
+                                                                dragX: screenX,
+                                                                dragY: screenY,
                                                                 cellWidth: cellWidth,
                                                                 cellHeight: cellHeight,
                                                                 contentWidth: contentWidth,
@@ -1484,54 +1489,60 @@ struct FolderOverlayView: View {
                                         )
                                     }
                                 }
-
-                                // Dragging item overlay - rendered on top so it's always visible
-                                if let dragging = draggingItem, case .app(let app) = dragging {
-                                    let displayX = dragStartPosition.x + draggingOffset.width
-                                    let displayY = dragStartPosition.y + draggingOffset.height
-
-                                    FolderAppItemView(
-                                        app: app,
-                                        iconSize: iconSize,
-                                        onTap: {},
-                                        onRemove: {}
-                                    )
-                                    .scaleEffect(1.1)
-                                    .opacity(0.9)
-                                    .position(x: displayX, y: displayY)
-                                    .zIndex(100)
-                                    .allowsHitTesting(false)
-                                }
                             }
                             .frame(width: contentWidth, height: contentHeight)
                         }
                     }
                     .offset(x: -CGFloat(currentPage) * contentWidth + dragOffset)
                     .animation(.easeInOut(duration: 0.3), value: currentPage)
-                }  // Group
+
+                        // Dragging item overlay - rendered outside the HStack so it's not affected by page offset
+                        if let dragging = draggingItem, case .app(let app) = dragging {
+                            let displayX = dragStartPosition.x + draggingOffset.width
+                            let displayY = dragStartPosition.y + draggingOffset.height
+
+                            FolderAppItemView(
+                                app: app,
+                                iconSize: iconSize,
+                                onTap: {},
+                                onRemove: {}
+                            )
+                            .scaleEffect(1.1)
+                            .opacity(0.9)
+                            .position(x: displayX, y: displayY)
+                            .zIndex(100)
+                            .allowsHitTesting(false)
+                        }
+                    }  // ZStack
                     .frame(width: contentWidth, height: contentHeight, alignment: .leading)
                     .contentShape(Rectangle())  // Enable hit testing on empty areas for drag gesture
                     .clipped()
                     .gesture(
                         DragGesture(minimumDistance: 15)
                             .onChanged { value in
-                                dragOffset = value.translation.width
-                                // Rubber-band effect at edges
-                                if currentPage == 0 && dragOffset > 0 {
-                                    dragOffset = min(dragOffset, 50)
-                                } else if currentPage == totalPages - 1 && dragOffset < 0 {
-                                    dragOffset = max(dragOffset, -50)
+                                // Only handle page swipe if not dragging an item
+                                if draggingItem == nil {
+                                    dragOffset = value.translation.width
+                                    // Rubber-band effect at edges
+                                    if currentPage == 0 && dragOffset > 0 {
+                                        dragOffset = min(dragOffset, 50)
+                                    } else if currentPage == totalPages - 1 && dragOffset < 0 {
+                                        dragOffset = max(dragOffset, -50)
+                                    }
                                 }
                             }
                             .onEnded { value in
-                                let threshold = contentWidth * 0.2
-                                withAnimation(.easeInOut(duration: 0.3)) {
-                                    if value.translation.width < -threshold && currentPage < totalPages - 1 {
-                                        currentPage += 1
-                                    } else if value.translation.width > threshold && currentPage > 0 {
-                                        currentPage -= 1
+                                // Only handle page swipe if not dragging an item
+                                if draggingItem == nil {
+                                    let threshold = contentWidth * 0.2
+                                    withAnimation(.easeInOut(duration: 0.3)) {
+                                        if value.translation.width < -threshold && currentPage < totalPages - 1 {
+                                            currentPage += 1
+                                        } else if value.translation.width > threshold && currentPage > 0 {
+                                            currentPage -= 1
+                                        }
+                                        dragOffset = 0
                                     }
-                                    dragOffset = 0
                                 }
                             }
                     )
