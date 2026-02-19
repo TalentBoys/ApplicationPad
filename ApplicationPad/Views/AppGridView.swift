@@ -212,6 +212,8 @@ struct AppGridView: View {
                                                             dragStartPosition = CGPoint(x: x, y: y)
                                                             dragAccumulatedOffset = .zero
                                                             dragStartPage = currentPage  // Remember which page we started on
+                                                            dragEdgePageChanged = false  // Reset edge state for new drag
+                                                            dragEdgeStartTime = nil
                                                             // Record mouse click position relative to icon center
                                                             // This ensures the icon stays "attached" to where the user clicked
                                                             dragMouseOffset = CGSize(
@@ -288,18 +290,7 @@ struct AppGridView: View {
                             }
                         }
                         .contentShape(Rectangle())
-                        .onTapGesture {
-                            if !isDraggingPage && draggingItem == nil {
-                                if openFolder != nil {
-                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                        openFolder = nil
-                                    }
-                                } else {
-                                    closeLauncher()
-                                }
-                            }
-                        }
-                        .gesture(
+                        .simultaneousGesture(
                             DragGesture(minimumDistance: 15)
                                 .onChanged { value in
                                     if draggingItem == nil {
@@ -329,6 +320,17 @@ struct AppGridView: View {
                                     isDraggingPage = false
                                 }
                         )
+                        .onTapGesture {
+                            if !isDraggingPage && draggingItem == nil {
+                                if openFolder != nil {
+                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                        openFolder = nil
+                                    }
+                                } else {
+                                    closeLauncher()
+                                }
+                            }
+                        }
                         .onAppear {
                             pageWidth = geo.size.width
                         }
@@ -540,15 +542,13 @@ struct AppGridView: View {
     private func updateDragPosition(localX: CGFloat, localY: CGFloat, cellWidth: CGFloat, cellHeight: CGFloat) {
         guard let currentIndex = dragCurrentIndex, let dragging = draggingItem else { return }
 
-        // Check for edge drag to change page using absolute screen position
-        // This is simpler and more reliable than calculating relative positions
-        let mouseLocation = NSEvent.mouseLocation
-        let screenWidth = NSScreen.main?.frame.width ?? pageWidth
-        let edgeThreshold: CGFloat = 50  // pixels from screen edge to trigger page change
+        // Check for edge drag to change page using local coordinates within the view
+        // localX is already in the coordinate space of the current page view
+        let edgeThreshold: CGFloat = 50  // pixels from view edge to trigger page change
         let edgeRepeatDelay: TimeInterval = 2.0  // seconds to wait before allowing another page change
 
-        let isNearLeftEdge = mouseLocation.x < edgeThreshold && currentPage > 0
-        let isNearRightEdge = mouseLocation.x > screenWidth - edgeThreshold && currentPage < totalPages - 1
+        let isNearLeftEdge = localX < edgeThreshold && currentPage > 0
+        let isNearRightEdge = localX > pageWidth - edgeThreshold && currentPage < totalPages - 1
         let isNearEdge = isNearLeftEdge || isNearRightEdge
 
         if isNearEdge {
@@ -983,6 +983,10 @@ struct FolderOverlayView: View {
     // Track external drag position inside folder
     @State private var externalDragTargetIndex: Int?
 
+    // Edge drag state for page change within folder
+    @State private var folderEdgePageChanged: Bool = false
+    @State private var folderEdgeStartTime: Date? = nil
+
     init(folder: FolderItem, iconSize: CGFloat, screenSize: CGSize,
          externalDraggingItem: LauncherItem? = nil,
          externalDraggingOffset: CGSize = .zero,
@@ -1097,6 +1101,8 @@ struct FolderOverlayView: View {
         dragStartPosition = .zero
         dragCurrentIndex = nil
         dragTargetIndex = nil
+        folderEdgePageChanged = false
+        folderEdgeStartTime = nil
     }
 
     /// Log folder layout as 2D grid (all pages) with UI parameters
@@ -1293,6 +1299,57 @@ struct FolderOverlayView: View {
                                                         let dragX = dragStartPosition.x + drag.translation.width
                                                         let dragY = dragStartPosition.y + drag.translation.height
 
+                                                        // Edge detection for page change within folder
+                                                        // Edge threshold is iconSize/2, relative to folder border (not content area)
+                                                        // Left edge: from -folderPadding/2 to -folderPadding/2 + iconSize/2
+                                                        // Right edge: from contentWidth + folderPadding/2 - iconSize/2 to contentWidth + folderPadding/2
+                                                        let edgeThreshold = iconSize / 2
+                                                        let leftEdgeStart = -folderPadding / 2
+                                                        let leftEdgeEnd = leftEdgeStart + edgeThreshold
+                                                        let rightEdgeStart = contentWidth + folderPadding / 2 - edgeThreshold
+                                                        let rightEdgeEnd = contentWidth + folderPadding / 2
+
+                                                        let isNearLeftEdge = dragX >= leftEdgeStart && dragX <= leftEdgeEnd && currentPage > 0
+                                                        let isNearRightEdge = dragX >= rightEdgeStart && dragX <= rightEdgeEnd && currentPage < totalPages - 1
+                                                        let isNearEdge = isNearLeftEdge || isNearRightEdge
+
+                                                        if isNearEdge {
+                                                            let now = Date()
+                                                            let edgeRepeatDelay: TimeInterval = 2.0
+
+                                                            var shouldChangePage = false
+                                                            var pageDirection: Int = 0
+
+                                                            if !folderEdgePageChanged {
+                                                                // First touch on edge - trigger page change immediately
+                                                                folderEdgePageChanged = true
+                                                                folderEdgeStartTime = now
+                                                                shouldChangePage = true
+                                                                pageDirection = isNearLeftEdge ? -1 : 1
+                                                            } else if let startTime = folderEdgeStartTime {
+                                                                // Already changed page, check if delay has passed
+                                                                if now.timeIntervalSince(startTime) >= edgeRepeatDelay {
+                                                                    folderEdgeStartTime = now
+                                                                    shouldChangePage = true
+                                                                    if isNearLeftEdge && currentPage > 0 {
+                                                                        pageDirection = -1
+                                                                    } else if isNearRightEdge && currentPage < totalPages - 1 {
+                                                                        pageDirection = 1
+                                                                    }
+                                                                }
+                                                            }
+
+                                                            if shouldChangePage && pageDirection != 0 {
+                                                                withAnimation(.easeInOut(duration: 0.3)) {
+                                                                    currentPage += pageDirection
+                                                                }
+                                                            }
+                                                        } else {
+                                                            // Not near edge - reset flags
+                                                            folderEdgePageChanged = false
+                                                            folderEdgeStartTime = nil
+                                                        }
+
                                                         // Check if dragged outside folder bounds
                                                         let margin: CGFloat = 30  // Some margin before triggering exit
                                                         let isOutside = dragX < -margin ||
@@ -1403,7 +1460,7 @@ struct FolderOverlayView: View {
                 .frame(width: folderWidth, height: folderHeight + (totalPages > 1 ? 20 : 0))
                 .background(
                     RoundedRectangle(cornerRadius: 20)
-                        .fill(Color.clear)
+                        .fill(Color.blue.opacity(0.3))  // DEBUG: Blue for testing edge detection
                         .background(
                             VisualEffectView()
                                 .clipShape(RoundedRectangle(cornerRadius: 20))
