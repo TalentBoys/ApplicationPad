@@ -30,8 +30,7 @@ struct AppGridView: View {
     @State private var dragAccumulatedOffset: CGSize = .zero  // Compensate for dragStartPosition changes
     @State private var dragMouseOffset: CGSize = .zero  // Mouse click position relative to icon center
     @State private var isDraggingPage: Bool = false
-    @State private var dragEdgePageChanged: Bool = false  // Prevent multiple page changes during edge drag
-    @State private var dragEdgeStartTime: Date? = nil  // Track when edge was first touched for auto-repeat
+    @State private var dragEdgeStartTime: Date? = nil  // Cooldown timer: last page change time (2s delay between changes)
     @State private var dragStartPage: Int = 0  // Page where drag started (for calculating true screen position)
 
     // State machine for drag behavior
@@ -217,8 +216,7 @@ struct AppGridView: View {
                                                             dragStartPosition = CGPoint(x: x, y: y)
                                                             dragAccumulatedOffset = .zero
                                                             dragStartPage = currentPage  // Remember which page we started on
-                                                            dragEdgePageChanged = false  // Reset edge state for new drag
-                                                            dragEdgeStartTime = nil
+                                                            dragEdgeStartTime = nil  // Reset cooldown for new drag
                                                             // Record mouse click position relative to icon center
                                                             // This ensures the icon stays "attached" to where the user clicked
                                                             dragMouseOffset = CGSize(
@@ -529,7 +527,6 @@ struct AppGridView: View {
         dragAccumulatedOffset = .zero
         dragMouseOffset = .zero
         dragStartPage = currentPage
-        dragEdgePageChanged = false
         dragEdgeStartTime = nil
         isDraggingFromFolder = true
 
@@ -613,48 +610,37 @@ struct AppGridView: View {
         // Check for edge drag to change page using local coordinates within the view
         // localX is already in the coordinate space of the current page view
         let edgeThreshold: CGFloat = 50  // pixels from view edge to trigger page change
-        let edgeRepeatDelay: TimeInterval = 2.0  // seconds to wait before allowing another page change
+        let edgeRepeatDelay: TimeInterval = 2.0  // seconds cooldown between page changes
 
         let isNearLeftEdge = localX < edgeThreshold && currentPage > 0
         let isNearRightEdge = localX > pageWidth - edgeThreshold && currentPage < totalPages - 1
         let isNearEdge = isNearLeftEdge || isNearRightEdge
 
-        // Debug log for edge detection
-        if isNearEdge || dragEdgePageChanged {
-            print("🔄 Edge: localX=\(Int(localX)), pageWidth=\(Int(pageWidth)), isNearEdge=\(isNearEdge), dragEdgePageChanged=\(dragEdgePageChanged), page=\(currentPage)")
-        }
-
         if isNearEdge {
             let now = Date()
-
             var shouldChangePage = false
             var pageDirection: Int = 0  // -1 for left, +1 for right
 
-            if !dragEdgePageChanged {
-                // First touch on edge - trigger page change immediately
-                dragEdgePageChanged = true
-                dragEdgeStartTime = now
+            // Simple cooldown logic: check if 2s has passed since last page change
+            if let lastChangeTime = dragEdgeStartTime {
+                let elapsed = now.timeIntervalSince(lastChangeTime)
+                if elapsed >= edgeRepeatDelay {
+                    shouldChangePage = true
+                    pageDirection = isNearLeftEdge ? -1 : 1
+                    print("🔄 Cooldown passed (\(String(format: "%.1f", elapsed))s), will change page: \(pageDirection)")
+                }
+            } else {
+                // First page change during this drag - allow immediately
                 shouldChangePage = true
                 pageDirection = isNearLeftEdge ? -1 : 1
                 print("🔄 First edge touch, will change page: \(pageDirection)")
-            } else if let startTime = dragEdgeStartTime {
-                // Already changed page, check if delay has passed for auto-repeat
-                let elapsed = now.timeIntervalSince(startTime)
-                if elapsed >= edgeRepeatDelay {
-                    // Reset for another page change
-                    dragEdgeStartTime = now
-                    shouldChangePage = true
-                    if isNearLeftEdge && currentPage > 0 {
-                        pageDirection = -1
-                    } else if isNearRightEdge && currentPage < totalPages - 1 {
-                        pageDirection = 1
-                    }
-                    print("🔄 Edge delay passed (\(elapsed)s), will change page: \(pageDirection)")
-                }
             }
 
             if shouldChangePage && pageDirection != 0 {
                 let newPage = currentPage + pageDirection
+
+                // Record this page change time for cooldown
+                dragEdgeStartTime = now
 
                 // Update dragAccumulatedOffset to compensate for page change
                 // This keeps the visual icon position consistent with cursor
@@ -665,14 +651,9 @@ struct AppGridView: View {
                 }
                 print("🔄 Page changed to \(newPage)")
             }
-        } else {
-            // Not near edge - reset flags to allow next edge trigger
-            if dragEdgePageChanged {
-                print("🔄 Left edge zone, resetting dragEdgePageChanged")
-            }
-            dragEdgePageChanged = false
-            dragEdgeStartTime = nil
         }
+        // Note: We never reset dragEdgeStartTime until drag ends
+        // This ensures 2s cooldown regardless of cursor position
 
         // Create layout params for state machine
         let layout = GridLayoutParams(
@@ -772,7 +753,6 @@ struct AppGridView: View {
         dragStartPosition = .zero
         dragAccumulatedOffset = .zero
         dragMouseOffset = .zero
-        dragEdgePageChanged = false
         dragEdgeStartTime = nil
         dragStartPage = 0
         dragStateMachine.reset()
@@ -831,7 +811,6 @@ struct AppGridView: View {
             dragStartPosition = .zero
             dragAccumulatedOffset = .zero
             dragMouseOffset = .zero
-            dragEdgePageChanged = false
             dragEdgeStartTime = nil
             dragIntoFolderTargetId = nil
             dragIntoFolderTargetIndex = nil
@@ -874,7 +853,6 @@ struct AppGridView: View {
         dragStartPosition = .zero
         dragAccumulatedOffset = .zero
         dragMouseOffset = .zero
-        dragEdgePageChanged = false
         dragEdgeStartTime = nil
         dragStartPage = 0
         dragIntoFolderTargetId = nil
