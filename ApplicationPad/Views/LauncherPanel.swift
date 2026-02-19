@@ -65,8 +65,11 @@ class LauncherPanel: NSPanel {
         // Reset to invisible state before showing
         LauncherAnimationState.shared.isContentVisible = false
 
-        NSApp.activate(ignoringOtherApps: true)
+        // First make window visible
         makeKeyAndOrderFront(nil)
+
+        // Then activate the app to ensure focus
+        NSApp.activate(ignoringOtherApps: true)
 
         startGlobalClickMonitor()
 
@@ -76,6 +79,9 @@ class LauncherPanel: NSPanel {
                 LauncherAnimationState.shared.isContentVisible = true
             }
             self.isAnimating = false
+
+            // Ensure window is key after animation starts
+            self.makeFirstResponder(self.contentView)
         }
     }
 

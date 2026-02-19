@@ -461,7 +461,8 @@ struct AppGridView: View {
     }
 
     private func focusSearchField() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+        // Need longer delay to ensure window is fully ready and key
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
             isSearchFocused = true
         }
     }
