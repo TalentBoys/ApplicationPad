@@ -146,6 +146,7 @@ struct AppGridView: View {
                         let cellHeight = (geo.size.height - topPadding - bottomPadding) / CGFloat(rowsCount)
 
                         ZStack {
+                            // Page content (scrolls with page changes)
                             HStack(spacing: 0) {
                                 ForEach(0..<totalPages, id: \.self) { page in
                                     let pageItems = itemsForPage(page)
@@ -161,14 +162,6 @@ struct AppGridView: View {
                                             let isMergeTarget = mergeTargetId == item.id
                                             let isMergeHoveringTarget = isMergeHovering && isMergeTarget
                                             let isMergeReadyTarget = isMergeReady && isMergeTarget
-                                            // Check if merge target is a folder (folders should scale up, not show gray background)
-                                            let isTargetFolder: Bool = {
-                                                if case .folder = item { return true }
-                                                return false
-                                            }()
-
-                                            let displayX = isDragging ? dragStartPosition.x + draggingOffset.width : x
-                                            let displayY = isDragging ? dragStartPosition.y + draggingOffset.height : y
 
                                             // Find the actual array index for this item
                                             let globalIndex = filteredItems.firstIndex(where: { $0.id == item.id }) ?? (page * appsPerPage + position)
@@ -188,14 +181,15 @@ struct AppGridView: View {
                                                 }
                                             )
                                             // Scale effect: all merge targets scale up when hovering/ready (folder preview effect)
-                                            .scaleEffect(isDragging ? 1.1 : (isMergeReadyTarget ? 1.15 : (isMergeHoveringTarget ? 1.1 : 1.0)))
-                                            .zIndex(isDragging ? 100 : 0)
-                                            .opacity(isDragging ? 0.9 : 1.0)
+                                            .scaleEffect(isMergeReadyTarget ? 1.15 : (isMergeHoveringTarget ? 1.1 : 1.0))
+                                            // Hide the item visually when dragging (it's rendered in overlay instead)
+                                            // but keep it in the view hierarchy so DragGesture continues to work
+                                            .opacity(isDragging ? 0 : 1.0)
                                             // Only animate position for non-dragging items to avoid flicker
-                                            .animation(isDragging ? nil : .easeInOut(duration: 0.2), value: position)
+                                            .animation(.easeInOut(duration: 0.2), value: position)
                                             .animation(.spring(response: 0.25, dampingFraction: 0.7), value: isMergeHoveringTarget)
                                             .animation(.spring(response: 0.2, dampingFraction: 0.6), value: isMergeReadyTarget)
-                                            .position(x: displayX, y: displayY)  // position 放最后，避免坐标系偏移
+                                            .position(x: x, y: y)
                                             .highPriorityGesture(
                                                 DragGesture(minimumDistance: 15)
                                                     .onChanged { drag in
@@ -218,31 +212,32 @@ struct AppGridView: View {
                                                             setupStateMachineCallbacks(cellWidth: cellWidth, cellHeight: cellHeight)
                                                         }
 
-                                                        if draggingItem?.id == item.id {
+                                                        // Don't check item.id - during drag, positions change
+                                                        // and the view's item might differ from draggingItem
+                                                        if draggingItem != nil {
                                                             // Apply accumulated offset and mouse offset to keep icon attached to cursor
                                                             draggingOffset = CGSize(
                                                                 width: drag.translation.width + dragAccumulatedOffset.width + dragMouseOffset.width,
                                                                 height: drag.translation.height + dragAccumulatedOffset.height + dragMouseOffset.height
                                                             )
 
-                                                            let dragX = dragStartPosition.x + draggingOffset.width
-                                                            let dragY = dragStartPosition.y + draggingOffset.height
-
-                                                            // screenX is the actual mouse position without page compensation
-                                                            // Used for edge detection to prevent page change loops
+                                                            // screenX/Y: actual mouse position WITHOUT page compensation
+                                                            // Used for edge detection and hit testing (local coordinates)
                                                             let screenX = dragStartPosition.x + drag.translation.width + dragMouseOffset.width
+                                                            let screenY = dragStartPosition.y + drag.translation.height + dragMouseOffset.height
 
                                                             updateDragPosition(
-                                                                dragX: dragX,
-                                                                dragY: dragY,
-                                                                screenX: screenX,
+                                                                localX: screenX,
+                                                                localY: screenY,
                                                                 cellWidth: cellWidth,
                                                                 cellHeight: cellHeight
                                                             )
                                                         }
                                                     }
                                                     .onEnded { _ in
-                                                        if draggingItem?.id == item.id {
+                                                        // Don't check item.id - during drag, positions change and
+                                                        // the item at this view might be different from draggingItem
+                                                        if draggingItem != nil {
                                                             finishDragging()
                                                         }
                                                     }
@@ -254,6 +249,27 @@ struct AppGridView: View {
                             }
                             .offset(x: -CGFloat(currentPage) * geo.size.width + dragOffset)
                             .animation(.easeInOut(duration: 0.3), value: currentPage)
+
+                            // Dragging item overlay - rendered outside page system so it's always visible
+                            if let dragging = draggingItem {
+                                let displayX = dragStartPosition.x + draggingOffset.width
+                                let displayY = dragStartPosition.y + draggingOffset.height
+
+                                GridItemView(
+                                    item: dragging,
+                                    iconSize: iconSize,
+                                    isMergeTarget: false,
+                                    isMergeHovering: false,
+                                    isMergeReady: false,
+                                    onTap: {},
+                                    onAppLaunch: {}
+                                )
+                                .scaleEffect(1.1)
+                                .opacity(0.9)
+                                .position(x: displayX, y: displayY)
+                                .zIndex(100)
+                                .allowsHitTesting(false)  // Don't intercept touches
+                            }
                         }
                         .contentShape(Rectangle())
                         .onTapGesture {
@@ -505,17 +521,16 @@ struct AppGridView: View {
         LauncherSettings.saveGridItems(gridState.stableItems)
     }
 
-    private func updateDragPosition(dragX: CGFloat, dragY: CGFloat, screenX: CGFloat, cellWidth: CGFloat, cellHeight: CGFloat) {
+    private func updateDragPosition(localX: CGFloat, localY: CGFloat, cellWidth: CGFloat, cellHeight: CGFloat) {
         guard let currentIndex = dragCurrentIndex, let dragging = draggingItem else { return }
 
         // Check for edge drag to change page
-        // Use screenX (actual mouse position) instead of dragX (compensated position)
-        // This prevents page change loops caused by dragAccumulatedOffset compensation
+        // localX/Y are actual mouse positions in local page coordinates
         let edgeThreshold: CGFloat = 50  // pixels from edge to trigger page change
         let edgeRepeatDelay: TimeInterval = 2.0  // seconds to wait before allowing another page change
 
-        let isNearLeftEdge = screenX < edgeThreshold && currentPage > 0
-        let isNearRightEdge = screenX > pageWidth - edgeThreshold && currentPage < totalPages - 1
+        let isNearLeftEdge = localX < edgeThreshold && currentPage > 0
+        let isNearRightEdge = localX > pageWidth - edgeThreshold && currentPage < totalPages - 1
         let isNearEdge = isNearLeftEdge || isNearRightEdge
 
         if isNearEdge {
@@ -547,8 +562,8 @@ struct AppGridView: View {
             if shouldChangePage && pageDirection != 0 {
                 let newPage = currentPage + pageDirection
 
-                // Update dragStartPosition to compensate for page change
-                // This keeps the visual position consistent
+                // Update dragAccumulatedOffset to compensate for page change
+                // This keeps the visual icon position consistent with cursor
                 dragAccumulatedOffset.width -= CGFloat(pageDirection) * pageWidth
 
                 withAnimation(.easeInOut(duration: 0.3)) {
@@ -573,9 +588,9 @@ struct AppGridView: View {
             topPadding: topPadding
         )
 
-        // Use state machine for hit detection and state management
+        // Use local coordinates for hit testing (relative to current page)
         dragStateMachine.updateDrag(
-            position: CGPoint(x: dragX, y: dragY),
+            position: CGPoint(x: localX, y: localY),
             gridItems: gridState.items,
             draggingItemId: dragging.id,
             sourceIndex: currentIndex,
