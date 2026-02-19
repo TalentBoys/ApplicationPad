@@ -1356,6 +1356,7 @@ struct FolderOverlayView: View {
                         .animation(.easeInOut(duration: 0.3), value: currentPage)
                     }  // Group
                     .frame(width: contentWidth, height: contentHeight, alignment: .leading)
+                    .contentShape(Rectangle())  // Enable hit testing on empty areas for drag gesture
                     .clipped()
                     .gesture(
                         DragGesture(minimumDistance: 15)
