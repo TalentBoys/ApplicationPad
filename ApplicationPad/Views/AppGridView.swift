@@ -32,6 +32,7 @@ struct AppGridView: View {
     @State private var isDraggingPage: Bool = false
     @State private var dragEdgePageChanged: Bool = false  // Prevent multiple page changes during edge drag
     @State private var dragEdgeStartTime: Date? = nil  // Track when edge was first touched for auto-repeat
+    @State private var dragStartPage: Int = 0  // Page where drag started (for calculating true screen position)
 
     // State machine for drag behavior
     @StateObject private var dragStateMachine = DragStateMachine()
@@ -114,6 +115,18 @@ struct AppGridView: View {
                 result.append((position: offset, item: item))
             }
         }
+
+        // IMPORTANT: If we're dragging an item and this is the page where drag started,
+        // ensure the dragging item is included (even if preview moved it elsewhere).
+        // This keeps the DragGesture alive.
+        if let dragging = draggingItem, page == dragStartPage {
+            let alreadyIncluded = result.contains { $0.item.id == dragging.id }
+            if !alreadyIncluded {
+                // Add it at position 0 (actual position doesn't matter since it's invisible)
+                result.append((position: 0, item: dragging))
+            }
+        }
+
         return result
     }
 
@@ -198,6 +211,7 @@ struct AppGridView: View {
                                                             dragCurrentIndex = globalIndex
                                                             dragStartPosition = CGPoint(x: x, y: y)
                                                             dragAccumulatedOffset = .zero
+                                                            dragStartPage = currentPage  // Remember which page we started on
                                                             // Record mouse click position relative to icon center
                                                             // This ensures the icon stays "attached" to where the user clicked
                                                             dragMouseOffset = CGSize(
@@ -221,9 +235,11 @@ struct AppGridView: View {
                                                                 height: drag.translation.height + dragAccumulatedOffset.height + dragMouseOffset.height
                                                             )
 
-                                                            // screenX/Y: actual mouse position WITHOUT page compensation
-                                                            // Used for edge detection and hit testing (local coordinates)
-                                                            let screenX = dragStartPosition.x + drag.translation.width + dragMouseOffset.width
+                                                            // Calculate actual screen position by compensating for page changes
+                                                            // drag.translation is relative to the view's original position
+                                                            // When page changes, the view moves but translation doesn't reset
+                                                            let pageOffset = CGFloat(currentPage - dragStartPage) * pageWidth
+                                                            let screenX = dragStartPosition.x + drag.translation.width + dragMouseOffset.width - pageOffset
                                                             let screenY = dragStartPosition.y + drag.translation.height + dragMouseOffset.height
 
                                                             updateDragPosition(
@@ -524,13 +540,15 @@ struct AppGridView: View {
     private func updateDragPosition(localX: CGFloat, localY: CGFloat, cellWidth: CGFloat, cellHeight: CGFloat) {
         guard let currentIndex = dragCurrentIndex, let dragging = draggingItem else { return }
 
-        // Check for edge drag to change page
-        // localX/Y are actual mouse positions in local page coordinates
-        let edgeThreshold: CGFloat = 50  // pixels from edge to trigger page change
+        // Check for edge drag to change page using absolute screen position
+        // This is simpler and more reliable than calculating relative positions
+        let mouseLocation = NSEvent.mouseLocation
+        let screenWidth = NSScreen.main?.frame.width ?? pageWidth
+        let edgeThreshold: CGFloat = 50  // pixels from screen edge to trigger page change
         let edgeRepeatDelay: TimeInterval = 2.0  // seconds to wait before allowing another page change
 
-        let isNearLeftEdge = localX < edgeThreshold && currentPage > 0
-        let isNearRightEdge = localX > pageWidth - edgeThreshold && currentPage < totalPages - 1
+        let isNearLeftEdge = mouseLocation.x < edgeThreshold && currentPage > 0
+        let isNearRightEdge = mouseLocation.x > screenWidth - edgeThreshold && currentPage < totalPages - 1
         let isNearEdge = isNearLeftEdge || isNearRightEdge
 
         if isNearEdge {
@@ -674,6 +692,9 @@ struct AppGridView: View {
         dragStartPosition = .zero
         dragAccumulatedOffset = .zero
         dragMouseOffset = .zero
+        dragEdgePageChanged = false
+        dragEdgeStartTime = nil
+        dragStartPage = 0
         dragStateMachine.reset()
 
         // Commit and save
@@ -775,6 +796,7 @@ struct AppGridView: View {
         dragMouseOffset = .zero
         dragEdgePageChanged = false
         dragEdgeStartTime = nil
+        dragStartPage = 0
         dragIntoFolderTargetId = nil
         dragIntoFolderTargetIndex = nil
     }
