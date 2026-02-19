@@ -431,7 +431,7 @@ extension GridState {
         let newItem: LauncherItem
         switch targetItem {
         case .folder(var folder):
-            folder.apps.append(contentsOf: appsToAdd)
+            folder.slots.append(contentsOf: appsToAdd.map { .app($0) })
             newItem = .folder(folder)
         case .app(let app):
             var apps = [app]

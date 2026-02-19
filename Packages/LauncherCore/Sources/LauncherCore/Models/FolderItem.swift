@@ -8,10 +8,23 @@
 import Foundation
 import AppKit
 
-public struct FolderItem: Identifiable, Equatable, Codable, Sendable {
+public struct FolderItem: Identifiable, Equatable, Sendable {
     public let id: UUID
     public var name: String
-    public var apps: [AppItem]
+    public var slots: [LauncherItem]  // Can contain .app or .empty (not .folder)
+
+    /// Get all non-empty apps in order
+    public var apps: [AppItem] {
+        slots.compactMap { item in
+            if case .app(let app) = item { return app }
+            return nil
+        }
+    }
+
+    /// Number of actual apps (excluding empty slots)
+    public var appCount: Int {
+        slots.filter { !$0.isEmpty }.count
+    }
 
     // Cache key for folder icon
     private var iconCacheKey: String {
@@ -66,13 +79,53 @@ public struct FolderItem: Identifiable, Equatable, Codable, Sendable {
         return image
     }
 
+    /// Initialize with apps (converts to slots)
     public init(id: UUID = UUID(), name: String, apps: [AppItem]) {
         self.id = id
         self.name = name
-        self.apps = apps
+        self.slots = apps.map { .app($0) }
+    }
+
+    /// Initialize with slots directly
+    public init(id: UUID = UUID(), name: String, slots: [LauncherItem]) {
+        self.id = id
+        self.name = name
+        self.slots = slots
     }
 
     public static func == (lhs: FolderItem, rhs: FolderItem) -> Bool {
-        lhs.id == rhs.id && lhs.apps.count == rhs.apps.count && lhs.apps.map { $0.id } == rhs.apps.map { $0.id }
+        lhs.id == rhs.id && lhs.slots.count == rhs.slots.count && lhs.slots.map { $0.id } == rhs.slots.map { $0.id }
+    }
+
+    // MARK: - Slot Management
+
+    /// Remove empty slots and compact the array
+    public mutating func compact() {
+        slots = slots.filter { !$0.isEmpty }
+    }
+}
+
+// MARK: - Codable conformance (encode/decode as apps for backward compatibility)
+
+extension FolderItem: Codable {
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case apps  // Encode as apps for backward compatibility
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        let apps = try container.decode([AppItem].self, forKey: .apps)
+        slots = apps.map { .app($0) }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(apps, forKey: .apps)  // Only encode non-empty apps
     }
 }

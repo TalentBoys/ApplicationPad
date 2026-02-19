@@ -233,7 +233,7 @@ public final class GridState: ObservableObject {
         switch targetItem {
         case .folder(var folder):
             // Add to existing folder
-            folder.apps.append(contentsOf: appsToAdd)
+            folder.slots.append(contentsOf: appsToAdd.map { .app($0) })
             newItem = .folder(folder)
         case .app(let app):
             // Create new folder

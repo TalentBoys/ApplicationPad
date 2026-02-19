@@ -98,7 +98,7 @@ public struct ContainerTransfer {
             if let existingContent = rootPages[toPageIndex].content(at: target) {
                 switch existingContent {
                 case .folder(var folder):
-                    folder.apps.append(app)
+                    folder.slots.append(.app(app))
                     rootPages[toPageIndex].setContent(.folder(folder), at: target)
                 case .app(let targetApp):
                     // Create new folder

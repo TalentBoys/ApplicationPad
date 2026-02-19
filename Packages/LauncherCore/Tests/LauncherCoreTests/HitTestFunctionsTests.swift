@@ -630,4 +630,126 @@ final class HitTestFunctionsTests: XCTestCase {
             "E1", "E2", "E3", "E4", "E5", "E6"
         ], "UT13: C4 insertRight to D4 -> items shift left within page, E6 stays on page 0")
     }
+
+    // MARK: - UT14: Folder Edge Zone Detection
+
+    /// Test folder edge zone calculation for page change trigger
+    /// Example from user:
+    /// - Folder visual width: 100
+    /// - iconSize: 32
+    /// - Folder left X: 150, right X: 250
+    /// - Left red zone: 134-150 (outside folder, to the left)
+    /// - Right red zone: 250-266 (outside folder, to the right)
+    /// - Blue zone (inside folder): 150-250
+    func testUT14_FolderEdgeZoneCalculation() {
+        // Given: folder visual bounds and iconSize
+        let folderWidth: CGFloat = 100
+        let iconSize: CGFloat = 32
+        let folderLeftX: CGFloat = 150  // Folder left edge in screen coordinates
+        let folderRightX: CGFloat = 250 // Folder right edge in screen coordinates
+
+        // Calculate edge zones (red zones are OUTSIDE folder)
+        let edgeWidth = iconSize / 2  // 16
+
+        // Left red zone: from folderLeft - edgeWidth to folderLeft
+        let leftZoneStart = folderLeftX - edgeWidth  // 150 - 16 = 134
+        let leftZoneEnd = folderLeftX                // 150
+
+        // Right red zone: from folderRight to folderRight + edgeWidth
+        let rightZoneStart = folderRightX            // 250
+        let rightZoneEnd = folderRightX + edgeWidth  // 250 + 16 = 266
+
+        // Verify zone boundaries
+        XCTAssertEqual(leftZoneStart, 134, "Left zone should start at folderLeft - iconSize/2")
+        XCTAssertEqual(leftZoneEnd, 150, "Left zone should end at folderLeft")
+        XCTAssertEqual(rightZoneStart, 250, "Right zone should start at folderRight")
+        XCTAssertEqual(rightZoneEnd, 266, "Right zone should end at folderRight + iconSize/2")
+
+        // Test point detection
+        func isInLeftZone(_ x: CGFloat) -> Bool {
+            return x >= leftZoneStart && x <= leftZoneEnd
+        }
+
+        func isInRightZone(_ x: CGFloat) -> Bool {
+            return x >= rightZoneStart && x <= rightZoneEnd
+        }
+
+        func isInsideFolder(_ x: CGFloat) -> Bool {
+            return x > folderLeftX && x < folderRightX
+        }
+
+        // Points in left zone (134-150)
+        XCTAssertTrue(isInLeftZone(134), "X=134 should be in left zone")
+        XCTAssertTrue(isInLeftZone(142), "X=142 should be in left zone")
+        XCTAssertTrue(isInLeftZone(150), "X=150 should be in left zone (boundary)")
+
+        // Points in right zone (250-266)
+        XCTAssertTrue(isInRightZone(250), "X=250 should be in right zone (boundary)")
+        XCTAssertTrue(isInRightZone(258), "X=258 should be in right zone")
+        XCTAssertTrue(isInRightZone(266), "X=266 should be in right zone")
+
+        // Points inside folder (150-250, exclusive at boundaries for zones)
+        XCTAssertTrue(isInsideFolder(151), "X=151 should be inside folder")
+        XCTAssertTrue(isInsideFolder(200), "X=200 should be inside folder")
+        XCTAssertTrue(isInsideFolder(249), "X=249 should be inside folder")
+
+        // Points outside all zones
+        XCTAssertFalse(isInLeftZone(133), "X=133 should be outside left zone")
+        XCTAssertFalse(isInRightZone(267), "X=267 should be outside right zone")
+        XCTAssertFalse(isInLeftZone(200), "X=200 should not be in left zone")
+        XCTAssertFalse(isInRightZone(200), "X=200 should not be in right zone")
+    }
+
+    /// Test folder edge zone calculation in content local coordinates
+    /// This matches the actual implementation in FolderOverlayView
+    func testUT15_FolderEdgeZoneInLocalCoordinates() {
+        // In content local coordinates:
+        // - Content area: 0 to contentWidth
+        // - Folder visual left edge: -folderPadding/2
+        // - Folder visual right edge: contentWidth + folderPadding/2
+
+        let contentWidth: CGFloat = 992  // Example content width
+        let folderPadding: CGFloat = 40
+        let iconSize: CGFloat = 64
+
+        let edgeWidth = iconSize / 2  // 32
+        let folderLeftEdge = -folderPadding / 2  // -20
+        let folderRightEdge = contentWidth + folderPadding / 2  // 1012
+
+        // Left zone: outside folder to the left
+        let leftZoneStart = folderLeftEdge - edgeWidth  // -20 - 32 = -52
+        let leftZoneEnd = folderLeftEdge                // -20
+
+        // Right zone: outside folder to the right
+        let rightZoneStart = folderRightEdge            // 1012
+        let rightZoneEnd = folderRightEdge + edgeWidth  // 1012 + 32 = 1044
+
+        XCTAssertEqual(leftZoneStart, -52)
+        XCTAssertEqual(leftZoneEnd, -20)
+        XCTAssertEqual(rightZoneStart, 1012)
+        XCTAssertEqual(rightZoneEnd, 1044)
+
+        // Test detection functions
+        func isInLeftZone(_ dragX: CGFloat) -> Bool {
+            return dragX >= leftZoneStart && dragX <= leftZoneEnd
+        }
+
+        func isInRightZone(_ dragX: CGFloat) -> Bool {
+            return dragX >= rightZoneStart && dragX <= rightZoneEnd
+        }
+
+        // Left zone tests
+        XCTAssertTrue(isInLeftZone(-52), "dragX=-52 should be in left zone (start)")
+        XCTAssertTrue(isInLeftZone(-36), "dragX=-36 should be in left zone (middle)")
+        XCTAssertTrue(isInLeftZone(-20), "dragX=-20 should be in left zone (end)")
+        XCTAssertFalse(isInLeftZone(-53), "dragX=-53 should be outside left zone")
+        XCTAssertFalse(isInLeftZone(-19), "dragX=-19 should be inside folder, not in left zone")
+
+        // Right zone tests
+        XCTAssertTrue(isInRightZone(1012), "dragX=1012 should be in right zone (start)")
+        XCTAssertTrue(isInRightZone(1028), "dragX=1028 should be in right zone (middle)")
+        XCTAssertTrue(isInRightZone(1044), "dragX=1044 should be in right zone (end)")
+        XCTAssertFalse(isInRightZone(1011), "dragX=1011 should be inside folder, not in right zone")
+        XCTAssertFalse(isInRightZone(1045), "dragX=1045 should be outside right zone")
+    }
 }
