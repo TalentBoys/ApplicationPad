@@ -473,6 +473,12 @@ struct AppGridView: View {
     }
 
     private func handleDragOutOfFolder(app: AppItem, dragPosition: CGPoint, folder: FolderItem, geo: GeometryProxy) {
+        // Prevent multiple calls - if we're already dragging an item, skip
+        guard draggingItem == nil else {
+            print("⚠️ handleDragOutOfFolder: already dragging, skipping duplicate call")
+            return
+        }
+
         print("📤 App dragged out of folder: \(app.name) at screen position \(dragPosition)")
 
         // Remove app from folder
@@ -586,19 +592,21 @@ struct AppGridView: View {
                 let mouseInViewX = mouseLocation.x
                 let mouseInViewY = screen.frame.height - mouseLocation.y
 
+                // Convert to grid-local coordinates (subtract notch and search height)
+                let notchHeight: CGFloat = 50
+                let searchHeight: CGFloat = 60
+                let gridLocalX = mouseInViewX
+                let gridLocalY = mouseInViewY - notchHeight - searchHeight
+
                 // Update dragging offset relative to start position
                 draggingOffset = CGSize(
-                    width: mouseInViewX - dragStartPosition.x,
-                    height: mouseInViewY - dragStartPosition.y
+                    width: gridLocalX - dragStartPosition.x,
+                    height: gridLocalY - dragStartPosition.y
                 )
 
-                // Calculate screen position for hit testing
-                let screenX = mouseInViewX
-                let screenY = mouseInViewY
-
                 updateDragPosition(
-                    localX: screenX,
-                    localY: screenY,
+                    localX: gridLocalX,
+                    localY: gridLocalY,
                     cellWidth: cellWidth,
                     cellHeight: cellHeight
                 )
@@ -617,7 +625,12 @@ struct AppGridView: View {
     }
 
     private func updateDragPosition(localX: CGFloat, localY: CGFloat, cellWidth: CGFloat, cellHeight: CGFloat) {
-        guard let currentIndex = dragCurrentIndex, let dragging = draggingItem else { return }
+        guard let currentIndex = dragCurrentIndex,
+              let dragging = draggingItem,
+              currentIndex >= 0 && currentIndex < gridState.items.count else {
+            print("⚠️ updateDragPosition: invalid state, currentIndex=\(dragCurrentIndex ?? -1), items.count=\(gridState.items.count)")
+            return
+        }
 
         // Check for edge drag to change page using local coordinates within the view
         // localX is already in the coordinate space of the current page view
@@ -1068,6 +1081,9 @@ struct FolderOverlayView: View {
     // Edge drag state for page change within folder
     @State private var folderEdgeStartTime: Date? = nil  // Cooldown timer for page changes
 
+    // Flag to prevent multiple handoff calls when dragging out
+    @State private var hasHandedOffDrag: Bool = false
+
     // Debug: mouse position tracking
     @State private var debugMousePosition: CGPoint = .zero
     @State private var debugMouseMonitor: Any?
@@ -1163,6 +1179,7 @@ struct FolderOverlayView: View {
         folderDragAccumulatedOffset = 0
         folderDragMouseOffset = .zero
         folderDragStartPage = 0
+        hasHandedOffDrag = false
     }
 
     /// Handle folder drag position update (edge detection, outside detection, apply operation)
@@ -1239,25 +1256,43 @@ struct FolderOverlayView: View {
                        dragY < -folderPadding / 2 - titleHeight ||
                        dragY > contentHeight + folderPadding / 2
 
-        if isOutside {
-            // Get mouse position for handoff
-            let mouseLocation = NSEvent.mouseLocation
-            if let screen = NSScreen.main {
-                let mouseInViewX = mouseLocation.x
-                let mouseInViewY = screen.frame.height - mouseLocation.y
+        if isOutside && !hasHandedOffDrag {
+            // Mark as handed off FIRST to prevent re-entry from subsequent drag events
+            hasHandedOffDrag = true
 
-                print("📤 Dragging out of folder: \(app.name)")
+            // Calculate icon's current screen position using the drag offset we already have
+            // This is more reliable than NSEvent.mouseLocation which has coordinate system issues
+            let iconDisplayX = dragStartPosition.x + draggingOffset.width
+            let iconDisplayY = dragStartPosition.y + draggingOffset.height
 
-                // Clear drag state FIRST to prevent re-entry
-                let draggedApp = app
-                draggingItem = nil
-                draggingOffset = .zero
-                dragCurrentIndex = nil
-                folderGridState.cancelPreview()
+            // Folder is centered on screen, calculate folder content's top-left in screen coordinates
+            let folderCenterX = geo.size.width / 2
+            let folderCenterY = geo.size.height / 2
+            let folderTopLeftX = folderCenterX - contentWidth / 2 - folderPadding / 2
+            let folderTopLeftY = folderCenterY - (contentHeight + titleHeight + folderPadding) / 2
 
-                // Use actual mouse position for handoff
-                onDragOutOfFolder(draggedApp, CGPoint(x: mouseInViewX, y: mouseInViewY))
-            }
+            // Icon position in screen coordinates (launcher top-left = 0,0)
+            let iconScreenX = folderTopLeftX + folderPadding / 2 + iconDisplayX
+            let iconScreenY = folderTopLeftY + titleHeight + 12 + folderPadding / 2 + iconDisplayY
+
+            print("📤 === Handing off drag to launcher ===")
+            print("📤 Icon (screen): (\(Int(iconScreenX)), \(Int(iconScreenY)))")
+            print("📤 Dragging out: \(app.name)")
+
+            // Clear folder drag state
+            let draggedApp = app
+            draggingItem = nil
+            draggingOffset = .zero
+            dragCurrentIndex = nil
+            folderGridState.cancelPreview()
+
+            // Hand off to launcher with icon's current screen position
+            onDragOutOfFolder(draggedApp, CGPoint(x: iconScreenX, y: iconScreenY))
+            return
+        }
+
+        // If already handed off, don't process further
+        if hasHandedOffDrag {
             return
         }
 
@@ -1464,6 +1499,7 @@ struct FolderOverlayView: View {
                                                             folderDragAccumulatedOffset = 0
                                                             folderDragStartPage = currentPage  // Remember which page we started on
                                                             folderEdgeStartTime = nil  // Reset cooldown for new drag
+                                                            hasHandedOffDrag = false  // Reset handoff flag for new drag
                                                             // Record mouse click offset relative to icon center
                                                             folderDragMouseOffset = CGSize(
                                                                 width: drag.startLocation.x - x,

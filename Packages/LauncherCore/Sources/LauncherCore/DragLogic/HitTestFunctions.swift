@@ -300,6 +300,9 @@ extension GridState {
         var newPreview = stableItems
         guard sourceIndex >= 0 && sourceIndex < newPreview.count else { return nil }
 
+        // Clamp targetIndex to valid range first
+        let clampedTarget = max(0, min(targetIndex, newPreview.count))
+
         let sourceItem = newPreview[sourceIndex]
 
         // Step 1: Mark source as empty
@@ -308,19 +311,18 @@ extension GridState {
         // Calculate page boundaries - IMPORTANT: limit search to current page only
         // to prevent pushing items to next page when current page has space
         let sourcePage = sourceIndex / layout.appsPerPage
-        let clampedTargetIndex = min(targetIndex, newPreview.count - 1)
-        let targetPage = clampedTargetIndex / layout.appsPerPage
+        let targetPage = min(clampedTarget, newPreview.count - 1) / layout.appsPerPage
         let currentPage = max(sourcePage, targetPage)
         let pageStart = currentPage * layout.appsPerPage
         let pageEnd = min((currentPage + 1) * layout.appsPerPage, newPreview.count)
 
-        // Clamp targetIndex to valid range for this page
-        let searchStartAfter = min(targetIndex, pageEnd)
-        let searchStartBefore = min(targetIndex - 1, pageEnd - 1)
+        // Clamp search ranges to valid bounds
+        let searchStartAfter = max(pageStart, min(clampedTarget, pageEnd))
+        let searchStartBefore = max(pageStart, min(clampedTarget - 1, pageEnd - 1))
 
         // Step 2: Find empty slots in both directions (within current page)
         var emptySlotAfter: Int? = nil
-        if searchStartAfter < pageEnd {
+        if searchStartAfter >= pageStart && searchStartAfter < pageEnd {
             for i in searchStartAfter..<pageEnd {
                 if newPreview[i].isEmpty {
                     emptySlotAfter = i
@@ -330,7 +332,7 @@ extension GridState {
         }
 
         var emptySlotBefore: Int? = nil
-        if searchStartBefore >= pageStart {
+        if searchStartBefore >= pageStart && searchStartBefore < pageEnd {
             for i in stride(from: searchStartBefore, through: pageStart, by: -1) {
                 if newPreview[i].isEmpty {
                     emptySlotBefore = i
@@ -345,60 +347,62 @@ extension GridState {
         if preferSqueezeLeft {
             // Prefer squeezing left first (for insertRight to row-end)
             if let emptyBefore = emptySlotBefore {
-                // Shift left: move items from emptySlotBefore forward to targetIndex - 1
+                // Shift left: move items from emptySlotBefore forward to clampedTarget - 1
                 var currentIndex = emptyBefore
-                while currentIndex < targetIndex - 1 {
+                let shiftEnd = min(clampedTarget - 1, newPreview.count - 1)
+                while currentIndex < shiftEnd {
                     newPreview[currentIndex] = newPreview[currentIndex + 1]
                     currentIndex += 1
                 }
-                // Item goes at targetIndex - 1 (since we shifted left)
-                finalTargetIndex = targetIndex - 1
+                // Item goes at clampedTarget - 1 (since we shifted left)
+                finalTargetIndex = max(0, clampedTarget - 1)
             } else if let emptyAfter = emptySlotAfter {
                 // Fallback: shift right
                 var currentIndex = emptyAfter
-                while currentIndex > targetIndex && currentIndex > 0 {
+                while currentIndex > clampedTarget && currentIndex > 0 {
                     newPreview[currentIndex] = newPreview[currentIndex - 1]
                     currentIndex -= 1
                 }
-                finalTargetIndex = targetIndex
+                finalTargetIndex = clampedTarget
             } else {
                 // No empty slot found anywhere, need to add one and shift right
                 newPreview.append(.empty(UUID()))
                 var currentIndex = newPreview.count - 1
-                while currentIndex > targetIndex && currentIndex > 0 {
+                while currentIndex > clampedTarget && currentIndex > 0 {
                     newPreview[currentIndex] = newPreview[currentIndex - 1]
                     currentIndex -= 1
                 }
-                finalTargetIndex = targetIndex
+                finalTargetIndex = clampedTarget
             }
         } else {
             // Default: prefer squeezing right first
             if let emptyAfter = emptySlotAfter {
-                // Shift right: move items from emptySlotAfter back to targetIndex
+                // Shift right: move items from emptySlotAfter back to clampedTarget
                 var currentIndex = emptyAfter
-                while currentIndex > targetIndex && currentIndex > 0 {
+                while currentIndex > clampedTarget && currentIndex > 0 {
                     newPreview[currentIndex] = newPreview[currentIndex - 1]
                     currentIndex -= 1
                 }
-                finalTargetIndex = targetIndex
+                finalTargetIndex = clampedTarget
             } else if let emptyBefore = emptySlotBefore {
                 // Fallback: shift left
                 var currentIndex = emptyBefore
-                while currentIndex < targetIndex - 1 {
+                let shiftEnd = min(clampedTarget - 1, newPreview.count - 1)
+                while currentIndex < shiftEnd {
                     newPreview[currentIndex] = newPreview[currentIndex + 1]
                     currentIndex += 1
                 }
-                // Item goes at targetIndex - 1 (since we shifted left)
-                finalTargetIndex = targetIndex - 1
+                // Item goes at clampedTarget - 1 (since we shifted left)
+                finalTargetIndex = max(0, clampedTarget - 1)
             } else {
                 // No empty slot found anywhere, need to add one and shift right
                 newPreview.append(.empty(UUID()))
                 var currentIndex = newPreview.count - 1
-                while currentIndex > targetIndex && currentIndex > 0 {
+                while currentIndex > clampedTarget && currentIndex > 0 {
                     newPreview[currentIndex] = newPreview[currentIndex - 1]
                     currentIndex -= 1
                 }
-                finalTargetIndex = targetIndex
+                finalTargetIndex = clampedTarget
             }
         }
 
