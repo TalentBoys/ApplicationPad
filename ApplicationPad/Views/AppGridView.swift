@@ -1102,10 +1102,13 @@ struct FolderOverlayView: View {
             }
         }
 
-        // Keep dragging item in the view hierarchy so DragGesture continues to work
-        if let dragging = draggingItem, page == currentPage {
+        // IMPORTANT: If we're dragging an item and this is the page where drag started,
+        // ensure the dragging item is included (even if preview moved it elsewhere).
+        // This keeps the DragGesture alive.
+        if let dragging = draggingItem, page == folderDragStartPage {
             let alreadyIncluded = result.contains { $0.item.id == dragging.id }
             if !alreadyIncluded {
+                // Add it at position 0 (actual position doesn't matter since it's invisible)
                 result.append((position: 0, item: dragging))
             }
         }
