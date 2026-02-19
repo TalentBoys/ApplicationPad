@@ -1011,9 +1011,7 @@ struct FolderOverlayView: View {
     private var appsPerPage: Int { folderRows * folderColumns }
 
     private var totalPages: Int {
-        let pages = max(1, Int(ceil(Double(folder.apps.count) / Double(appsPerPage))))
-        print("📁 Folder pagination: apps=\(folder.apps.count), rows=\(folderRows), cols=\(folderColumns), perPage=\(appsPerPage), totalPages=\(pages)")
-        return pages
+        max(1, Int(ceil(Double(folder.apps.count) / Double(appsPerPage))))
     }
 
     private func appsForPage(_ page: Int) -> [AppItem] {
@@ -1028,7 +1026,6 @@ struct FolderOverlayView: View {
         let start = page * appsPerPage
         let end = min(start + appsPerPage, folder.apps.count)
         guard start < folder.apps.count else {
-            print("📁 appsForPageWithDrag(\(page)): empty - start=\(start) >= count=\(folder.apps.count)")
             return []
         }
 
@@ -1067,7 +1064,6 @@ struct FolderOverlayView: View {
                     result.append((position: visualPos, app: folder.apps[sourceIndex]))
                 }
             }
-            print("📁 appsForPageWithDrag(\(page)): drag mode, returning \(result.count) items")
             return result
         }
 
@@ -1076,7 +1072,6 @@ struct FolderOverlayView: View {
         for (offset, index) in (start..<end).enumerated() {
             result.append((position: offset, app: folder.apps[index]))
         }
-        print("📁 appsForPageWithDrag(\(page)): normal mode, start=\(start), end=\(end), returning \(result.count) items")
         return result
     }
 
@@ -1104,6 +1099,77 @@ struct FolderOverlayView: View {
         dragTargetIndex = nil
     }
 
+    /// Log folder layout as 2D grid (all pages) with UI parameters
+    private func logFolderLayout(label: String, contentWidth: CGFloat, contentHeight: CGFloat, cellWidth: CGFloat, cellHeight: CGFloat) {
+        // Build the visual layout based on current drag state
+        var displayApps: [AppItem] = folder.apps
+
+        // If dragging, compute visual reordering
+        if let fromIndex = dragCurrentIndex,
+           let toIndex = dragTargetIndex,
+           fromIndex != toIndex {
+            // Simulate the visual reorder
+            var reordered: [AppItem] = []
+            for visualPos in 0..<folder.apps.count {
+                let sourceIndex: Int
+                if visualPos == toIndex {
+                    sourceIndex = fromIndex
+                } else if fromIndex < toIndex {
+                    if visualPos >= fromIndex && visualPos < toIndex {
+                        sourceIndex = visualPos + 1
+                    } else {
+                        sourceIndex = visualPos
+                    }
+                } else {
+                    if visualPos > toIndex && visualPos <= fromIndex {
+                        sourceIndex = visualPos - 1
+                    } else {
+                        sourceIndex = visualPos
+                    }
+                }
+                if sourceIndex >= 0 && sourceIndex < folder.apps.count {
+                    reordered.append(folder.apps[sourceIndex])
+                }
+            }
+            displayApps = reordered
+        }
+
+        // Format as 2D grid with pages
+        var lines: [String] = []
+        lines.append("📁 [\(label)] Folder '\(folder.name)'")
+        lines.append("  Grid: \(folderColumns)x\(folderRows), \(totalPages) pages, \(folder.apps.count) apps")
+        lines.append("  UI: contentSize=\(Int(contentWidth))x\(Int(contentHeight)), cellSize=\(Int(cellWidth))x\(Int(cellHeight))")
+
+        for page in 0..<totalPages {
+            if totalPages > 1 {
+                lines.append("  --- Page \(page) ---")
+            }
+            let pageStart = page * appsPerPage
+
+            for row in 0..<folderRows {
+                var rowItems: [String] = []
+                for col in 0..<folderColumns {
+                    let index = pageStart + row * folderColumns + col
+                    if index < displayApps.count {
+                        let app = displayApps[index]
+                        let isDragging = draggingApp?.id == app.id
+                        // Show position info: name(x,y)
+                        let x = Int(cellWidth * (CGFloat(col) + 0.5))
+                        let y = Int(cellHeight * (CGFloat(row) + 0.5))
+                        let name = String(app.name.prefix(6))
+                        let posInfo = "\(name)(\(x),\(y))"
+                        rowItems.append(isDragging ? "[\(posInfo)]" : posInfo)
+                    } else {
+                        rowItems.append("·")
+                    }
+                }
+                lines.append("  " + rowItems.joined(separator: " | "))
+            }
+        }
+
+        print(lines.joined(separator: "\n"))
+    }
+
     // Calculate cell size based on launcher's cell size
     private var launcherCellWidth: CGFloat {
         (screenSize.width - LauncherSettings.horizontalPadding * 2) / CGFloat(LauncherSettings.columnsCount)
@@ -1124,6 +1190,10 @@ struct FolderOverlayView: View {
         let titleHeight: CGFloat = 40
         let folderWidth = contentWidth + folderPadding
         let folderHeight = contentHeight + titleHeight + folderPadding
+
+        // Cell size within folder content area
+        let cellWidth = contentWidth / CGFloat(folderColumns)
+        let cellHeight = contentHeight / CGFloat(folderRows)
 
         GeometryReader { geo in
             ZStack {
@@ -1159,52 +1229,53 @@ struct FolderOverlayView: View {
 
                     Spacer().frame(height: 12)
 
-                    // Paginated apps grid
-                    ZStack {
+                    // Paginated apps grid - wrapped in a container with leading alignment
+                    // to prevent centering when HStack is wider than container
+                    Group {
                         HStack(spacing: 0) {
                             ForEach(0..<totalPages, id: \.self) { page in
-                                // Grid for each page - use ZStack with position like launcher
-                                ZStack {
-                                    let pageApps = appsForPageWithDrag(page)
-                                    ForEach(pageApps, id: \.app.id) { itemData in
-                                        let app = itemData.app
-                                        let position = itemData.position
-                                        let row = position / folderColumns
-                                        let col = position % folderColumns
-                                        let x = launcherCellWidth * (CGFloat(col) + 0.5)
-                                        let y = launcherCellHeight * (CGFloat(row) + 0.5)
-                                        let isDragging = draggingApp?.id == app.id
-                                        let globalIndex = folder.apps.firstIndex(where: { $0.id == app.id }) ?? (page * appsPerPage + position)
+                            // Grid for each page - use ZStack with position like launcher
+                            ZStack {
+                                let pageApps = appsForPageWithDrag(page)
+                                ForEach(pageApps, id: \.app.id) { itemData in
+                                    let app = itemData.app
+                                    let position = itemData.position
+                                    let row = position / folderColumns
+                                    let col = position % folderColumns
+                                    let x = cellWidth * (CGFloat(col) + 0.5)
+                                    let y = cellHeight * (CGFloat(row) + 0.5)
+                                    let isDragging = draggingApp?.id == app.id
+                                    let globalIndex = folder.apps.firstIndex(where: { $0.id == app.id }) ?? (page * appsPerPage + position)
 
-                                        let displayX = isDragging ? dragStartPosition.x + draggingOffset.width : x
-                                        let displayY = isDragging ? dragStartPosition.y + draggingOffset.height : y
+                                    let displayX = isDragging ? dragStartPosition.x + draggingOffset.width : x
+                                    let displayY = isDragging ? dragStartPosition.y + draggingOffset.height : y
 
-                                        FolderAppItemView(
-                                            app: app,
-                                            iconSize: iconSize,
-                                            onTap: {
-                                                app.markUsed()
-                                                NSWorkspace.shared.open(app.url)
-                                                onAppLaunch()
+                                    FolderAppItemView(
+                                        app: app,
+                                        iconSize: iconSize,
+                                        onTap: {
+                                            app.markUsed()
+                                            NSWorkspace.shared.open(app.url)
+                                            onAppLaunch()
+                                            onClose()
+                                            LauncherPanel.shared.close()
+                                        },
+                                        onRemove: {
+                                            var updated = folder
+                                            updated.apps.removeAll { $0.url == app.url }
+                                            onFolderUpdate(updated)
+                                            if updated.apps.isEmpty {
                                                 onClose()
-                                                LauncherPanel.shared.close()
-                                            },
-                                            onRemove: {
-                                                var updated = folder
-                                                updated.apps.removeAll { $0.url == app.url }
-                                                onFolderUpdate(updated)
-                                                if updated.apps.isEmpty {
-                                                    onClose()
-                                                }
                                             }
-                                        )
-                                        .scaleEffect(isDragging ? 1.1 : 1.0)
-                                        .zIndex(isDragging ? 100 : 0)
-                                        .opacity(isDragging ? 0.9 : 1.0)
-                                        // Animate position changes for non-dragging items
-                                        .animation(isDragging ? nil : .easeInOut(duration: 0.2), value: globalIndex)
-                                        .position(x: displayX, y: displayY)
-                                        .highPriorityGesture(
+                                        }
+                                    )
+                                    .scaleEffect(isDragging ? 1.1 : 1.0)
+                                    .zIndex(isDragging ? 100 : 0)
+                                    .opacity(isDragging ? 0.9 : 1.0)
+                                    // Animate position changes for non-dragging items
+                                    .animation(isDragging ? nil : .easeInOut(duration: 0.2), value: globalIndex)
+                                    .position(x: displayX, y: displayY)
+                                    .highPriorityGesture(
                                             DragGesture(minimumDistance: 15)
                                                 .onChanged { drag in
                                                     if draggingApp == nil {
@@ -1212,6 +1283,7 @@ struct FolderOverlayView: View {
                                                         dragCurrentIndex = globalIndex
                                                         dragTargetIndex = globalIndex
                                                         dragStartPosition = CGPoint(x: x, y: y)
+                                                        logFolderLayout(label: "Drag Start - \(app.name)", contentWidth: contentWidth, contentHeight: contentHeight, cellWidth: cellWidth, cellHeight: cellHeight)
                                                     }
 
                                                     if draggingApp?.id == app.id {
@@ -1251,8 +1323,8 @@ struct FolderOverlayView: View {
                                                         }
 
                                                         // Calculate target index based on drag position
-                                                        let targetCol = Int(floor(dragX / launcherCellWidth))
-                                                        let targetRow = Int(floor(dragY / launcherCellHeight))
+                                                        let targetCol = Int(floor(dragX / cellWidth))
+                                                        let targetRow = Int(floor(dragY / cellHeight))
 
                                                         if targetCol >= 0 && targetCol < folderColumns &&
                                                            targetRow >= 0 && targetRow < folderRows {
@@ -1260,9 +1332,11 @@ struct FolderOverlayView: View {
                                                             let targetIndex = currentPage * appsPerPage + targetPosInPage
 
                                                             if targetIndex >= 0 && targetIndex < folder.apps.count && targetIndex != dragTargetIndex {
+                                                                let oldTarget = dragTargetIndex
                                                                 withAnimation(.easeInOut(duration: 0.2)) {
                                                                     dragTargetIndex = targetIndex
                                                                 }
+                                                                logFolderLayout(label: "Target \(oldTarget ?? -1) -> \(targetIndex)", contentWidth: contentWidth, contentHeight: contentHeight, cellWidth: cellWidth, cellHeight: cellHeight)
                                                             }
                                                         }
                                                     }
@@ -1280,8 +1354,8 @@ struct FolderOverlayView: View {
                         }
                         .offset(x: -CGFloat(currentPage) * contentWidth + dragOffset)
                         .animation(.easeInOut(duration: 0.3), value: currentPage)
-                    }
-                    .frame(width: contentWidth, height: contentHeight)
+                    }  // Group
+                    .frame(width: contentWidth, height: contentHeight, alignment: .leading)
                     .clipped()
                     .gesture(
                         DragGesture(minimumDistance: 15)
@@ -1342,6 +1416,7 @@ struct FolderOverlayView: View {
         // No transition on the container - the dimmed background appears instantly
         .onAppear {
             startFolderScrollMonitor()
+            logFolderLayout(label: "Open", contentWidth: contentWidth, contentHeight: contentHeight, cellWidth: cellWidth, cellHeight: cellHeight)
         }
         .onDisappear {
             stopFolderScrollMonitor()
@@ -1362,6 +1437,10 @@ struct FolderOverlayView: View {
             let folderPadding: CGFloat = 40
             let titleHeight: CGFloat = 40
 
+            // Cell size within folder
+            let cellWidth = contentWidth / CGFloat(folderColumns)
+            let cellHeight = contentHeight / CGFloat(folderRows)
+
             // Calculate folder content bounds
             let folderLeft = folderCenterX - contentWidth / 2
             let folderTop = folderCenterY - (contentHeight + titleHeight + folderPadding) / 2 + titleHeight + folderPadding / 2 + 12
@@ -1371,8 +1450,8 @@ struct FolderOverlayView: View {
             let localY = dragY - folderTop
 
             // Calculate target cell
-            let targetCol = Int(floor(localX / launcherCellWidth))
-            let targetRow = Int(floor(localY / launcherCellHeight))
+            let targetCol = Int(floor(localX / cellWidth))
+            let targetRow = Int(floor(localY / cellHeight))
 
             if targetCol >= 0 && targetCol < folderColumns &&
                targetRow >= 0 && targetRow < folderRows {
