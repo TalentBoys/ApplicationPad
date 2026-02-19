@@ -763,6 +763,16 @@ struct AppGridView: View {
     }
 
     private func finishDragging() {
+        // Ask state machine if we should merge (do this FIRST to determine intent)
+        let (shouldMerge, targetId, _) = dragStateMachine.endDrag()
+
+        // If merge state reached, clear drag-into-folder state
+        // Merge takes precedence over dropping into folder
+        if shouldMerge && targetId != nil {
+            dragIntoFolderTargetId = nil
+            dragIntoFolderTargetIndex = nil
+        }
+
         // Check if we're dragging into an open folder
         if let folderId = dragIntoFolderTargetId,
            let targetInsertIndex = dragIntoFolderTargetIndex,
@@ -818,9 +828,7 @@ struct AppGridView: View {
             return
         }
 
-        // Ask state machine if we should merge
-        let (shouldMerge, targetId, _) = dragStateMachine.endDrag()
-
+        // Use the shouldMerge/targetId from endDrag() called earlier
         print("🔚 finishDragging: shouldMerge=\(shouldMerge), targetId=\(targetId?.uuidString.prefix(8) ?? "nil")")
         print("   dragCurrentIndex=\(dragCurrentIndex ?? -1), draggingItem=\(draggingItem?.name ?? "nil")")
         print("   gridState.previewHasChanges=\(gridState.previewHasChanges)")

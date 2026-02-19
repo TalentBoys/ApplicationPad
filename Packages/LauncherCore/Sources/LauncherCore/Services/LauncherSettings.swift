@@ -115,7 +115,62 @@ public struct LauncherSettings {
               let decoded = try? JSONDecoder().decode([LauncherItemData].self, from: data) else {
             return nil
         }
-        return decoded.compactMap { $0.toLauncherItem() }
+        let items = decoded.compactMap { $0.toLauncherItem() }
+        // Clean up duplicates on load
+        return removeDuplicateApps(from: items)
+    }
+
+    /// Remove duplicate apps from grid items (keeps first occurrence)
+    /// Duplicates can occur due to bugs in drag operations
+    private static func removeDuplicateApps(from items: [LauncherItem]) -> [LauncherItem] {
+        var seenURLs = Set<URL>()
+        var result: [LauncherItem] = []
+        var hadDuplicates = false
+
+        for item in items {
+            switch item {
+            case .app(let app):
+                if seenURLs.contains(app.url) {
+                    // Skip duplicate
+                    print("⚠️ Removing duplicate app: \(app.name)")
+                    hadDuplicates = true
+                } else {
+                    seenURLs.insert(app.url)
+                    result.append(item)
+                }
+            case .folder(let folder):
+                // Also dedupe apps inside folders
+                var cleanedApps: [AppItem] = []
+                for app in folder.apps {
+                    if seenURLs.contains(app.url) {
+                        print("⚠️ Removing duplicate app from folder '\(folder.name)': \(app.name)")
+                        hadDuplicates = true
+                    } else {
+                        seenURLs.insert(app.url)
+                        cleanedApps.append(app)
+                    }
+                }
+                if cleanedApps.isEmpty {
+                    // Folder became empty, skip it
+                    print("⚠️ Removing empty folder: \(folder.name)")
+                    hadDuplicates = true
+                } else {
+                    var cleanedFolder = folder
+                    cleanedFolder.slots = cleanedApps.map { .app($0) }
+                    result.append(.folder(cleanedFolder))
+                }
+            case .empty:
+                result.append(item)
+            }
+        }
+
+        // If duplicates were found, save the cleaned data
+        if hadDuplicates {
+            print("✅ Cleaned up duplicate apps, saving...")
+            saveGridItems(result)
+        }
+
+        return result
     }
 
     public static func applyCustomOrder(to apps: [AppItem]) -> [LauncherItem] {
