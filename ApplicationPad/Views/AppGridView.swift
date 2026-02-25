@@ -217,6 +217,9 @@ struct AppGridView: View {
                                                             dragAccumulatedOffset = .zero
                                                             dragStartPage = currentPage  // Remember which page we started on
                                                             dragEdgeStartTime = nil  // Reset cooldown for new drag
+                                                            // Cancel any page drag that started on the same frame
+                                                            dragOffset = 0
+                                                            isDraggingPage = false
                                                             // Record mouse click position relative to icon center
                                                             // This ensures the icon stays "attached" to where the user clicked
                                                             dragMouseOffset = CGSize(
@@ -268,7 +271,7 @@ struct AppGridView: View {
                                     .frame(width: geo.size.width, height: geo.size.height)
                                 }
                             }
-                            .offset(x: -CGFloat(currentPage) * geo.size.width + dragOffset)
+                            .offset(x: -CGFloat(currentPage) * geo.size.width + (draggingItem == nil ? dragOffset : 0))
                             .animation(.easeInOut(duration: 0.3), value: currentPage)
 
                             // Dragging item overlay - rendered outside page system so it's always visible
