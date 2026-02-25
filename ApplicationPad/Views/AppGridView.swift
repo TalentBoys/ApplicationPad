@@ -589,31 +589,33 @@ struct AppGridView: View {
                 return event
             }
 
-            // Update position based on mouse location
-            let mouseLocation = NSEvent.mouseLocation
-            if let screen = NSScreen.main {
-                let mouseInViewX = mouseLocation.x
-                let mouseInViewY = screen.frame.height - mouseLocation.y
+            // Use event.locationInWindow for correct coordinates on any screen
+            // locationInWindow is relative to the window (origin at bottom-left),
+            // unlike NSEvent.mouseLocation which uses global Cocoa screen coords
+            // and breaks on multi-monitor setups with different screen origins
+            let window = event.window ?? LauncherPanel.shared
+            let loc = event.locationInWindow
+            let mouseInViewX = loc.x
+            let mouseInViewY = window.frame.height - loc.y  // flip to top-left origin
 
-                // Convert to grid-local coordinates (subtract notch and search height)
-                let notchHeight: CGFloat = 50
-                let searchHeight: CGFloat = 60
-                let gridLocalX = mouseInViewX
-                let gridLocalY = mouseInViewY - notchHeight - searchHeight
+            // Convert to grid-local coordinates (subtract notch and search height)
+            let notchHeight: CGFloat = 50
+            let searchHeight: CGFloat = 60
+            let gridLocalX = mouseInViewX
+            let gridLocalY = mouseInViewY - notchHeight - searchHeight
 
-                // Update dragging offset relative to start position
-                draggingOffset = CGSize(
-                    width: gridLocalX - dragStartPosition.x,
-                    height: gridLocalY - dragStartPosition.y
-                )
+            // Update dragging offset relative to start position
+            draggingOffset = CGSize(
+                width: gridLocalX - dragStartPosition.x,
+                height: gridLocalY - dragStartPosition.y
+            )
 
-                updateDragPosition(
-                    localX: gridLocalX,
-                    localY: gridLocalY,
-                    cellWidth: cellWidth,
-                    cellHeight: cellHeight
-                )
-            }
+            updateDragPosition(
+                localX: gridLocalX,
+                localY: gridLocalY,
+                cellWidth: cellWidth,
+                cellHeight: cellHeight
+            )
 
             return event
         }
@@ -1758,12 +1760,9 @@ struct FolderOverlayView: View {
 
     private func startDebugMouseMonitor() {
         debugMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged]) { [self] event in
-            if let screen = NSScreen.main {
-                let mouseLocation = NSEvent.mouseLocation
-                let mouseInViewX = mouseLocation.x
-                let mouseInViewY = screen.frame.height - mouseLocation.y
-                debugMousePosition = CGPoint(x: mouseInViewX, y: mouseInViewY)
-            }
+            let window = event.window ?? LauncherPanel.shared
+            let loc = event.locationInWindow
+            debugMousePosition = CGPoint(x: loc.x, y: window.frame.height - loc.y)
             return event
         }
     }
