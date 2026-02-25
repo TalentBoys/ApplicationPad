@@ -760,6 +760,13 @@ struct AppGridView: View {
     }
 
     private func performMerge(draggingItem: LauncherItem, targetId: UUID, currentIndex: Int) {
+        // Reset preview to stable before merge.
+        // During drag, reorder operations (applyOperation) rearrange the preview,
+        // moving the dragged item away from its stable position (currentIndex).
+        // merge() operates on preview items, so we must reset to ensure the
+        // dragged item is at currentIndex where merge() expects it.
+        gridState.resetPreviewToStable()
+
         guard let targetIndex = gridState.items.firstIndex(where: { $0.id == targetId }) else {
             print("❌ performMerge: target not found")
             return

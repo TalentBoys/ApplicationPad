@@ -163,6 +163,14 @@ public final class GridState: ObservableObject {
         logLayout(label: "Preview Cancelled (reverted to stable)")
     }
 
+    /// Reset preview back to stable without ending preview mode.
+    /// Use before merge: reorder operations may have moved the dragged item
+    /// away from its stable index, but merge needs it at the stable index.
+    public func resetPreviewToStable() {
+        guard preview != nil else { return }
+        preview = stable
+    }
+
     /// Set preview items directly (for HitTestFunctions)
     public func setPreviewItems(_ items: [LauncherItem]) {
         preview = items
