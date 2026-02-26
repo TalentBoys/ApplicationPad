@@ -1647,12 +1647,12 @@ struct FolderOverlayView: View {
         // No transition on the container - the dimmed background appears instantly
         .onAppear {
             startFolderScrollMonitor()
-            startDebugMouseMonitor()
+//            startDebugMouseMonitor()
             logFolderLayout(label: "Open", contentWidth: contentWidth, contentHeight: contentHeight, cellWidth: cellWidth, cellHeight: cellHeight)
         }
         .onDisappear {
             stopFolderScrollMonitor()
-            stopDebugMouseMonitor()
+//            stopDebugMouseMonitor()
         }
         .onChange(of: externalDraggingOffset) { _, newOffset in
             // Track external drag position and calculate target index inside folder
@@ -1795,35 +1795,35 @@ struct FolderOverlayView: View {
                 )
 
             // DEBUG: Folder visual area (blue) - entire folder bounds
-            RoundedRectangle(cornerRadius: 20)
-                .fill(Color.blue.opacity(0.3))
+//            RoundedRectangle(cornerRadius: 20)
+//                .fill(Color.blue.opacity(0.3))
         }
     }
 
     @ViewBuilder
     private func folderDebugOverlay(folderWidth: CGFloat, folderHeight: CGFloat, geoSize: CGSize) -> some View {
         ZStack {
-            // DEBUG: Left edge zone (red) - OUTSIDE folder, triggers page change to previous
-            Rectangle()
-                .fill(Color.red.opacity(0.5))
-                .frame(width: iconSize / 2, height: folderHeight)
-                .position(x: -iconSize / 4, y: folderHeight / 2)
-
-            // DEBUG: Right edge zone (red) - OUTSIDE folder, triggers page change to next
-            Rectangle()
-                .fill(Color.red.opacity(0.5))
-                .frame(width: iconSize / 2, height: folderHeight)
-                .position(x: folderWidth + iconSize / 4, y: folderHeight / 2)
-
-            // DEBUG: Mouse position display
-            Text("(\(Int(debugMousePosition.x)), \(Int(debugMousePosition.y)))")
-                .font(.caption)
-                .foregroundColor(.white)
-                .padding(4)
-                .background(Color.black.opacity(0.7))
-                .cornerRadius(4)
-                .position(x: debugMousePosition.x - geoSize.width / 2 + folderWidth / 2,
-                          y: debugMousePosition.y - geoSize.height / 2 + folderHeight / 2 - 20)
+//            // DEBUG: Left edge zone (red) - OUTSIDE folder, triggers page change to previous
+//            Rectangle()
+//                .fill(Color.red.opacity(0.5))
+//                .frame(width: iconSize / 2, height: folderHeight)
+//                .position(x: -iconSize / 4, y: folderHeight / 2)
+//
+//            // DEBUG: Right edge zone (red) - OUTSIDE folder, triggers page change to next
+//            Rectangle()
+//                .fill(Color.red.opacity(0.5))
+//                .frame(width: iconSize / 2, height: folderHeight)
+//                .position(x: folderWidth + iconSize / 4, y: folderHeight / 2)
+//
+//            // DEBUG: Mouse position display
+//            Text("(\(Int(debugMousePosition.x)), \(Int(debugMousePosition.y)))")
+//                .font(.caption)
+//                .foregroundColor(.white)
+//                .padding(4)
+//                .background(Color.black.opacity(0.7))
+//                .cornerRadius(4)
+//                .position(x: debugMousePosition.x - geoSize.width / 2 + folderWidth / 2,
+//                          y: debugMousePosition.y - geoSize.height / 2 + folderHeight / 2 - 20)
         }
     }
 }
