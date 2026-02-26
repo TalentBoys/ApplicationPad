@@ -8,9 +8,11 @@
 
 /* Begin PBXBuildFile section */
 		9D5DD85E2F40E6DA00ED842C /* LauncherCore in Frameworks */ = {isa = PBXBuildFile; productRef = 9D5DD85D2F40E6DA00ED842C /* LauncherCore */; };
+		9D5DD8632F4EE58A00ED842C /* price.storekit in Resources */ = {isa = PBXBuildFile; fileRef = 9D5DD8622F4EE58A00ED842C /* price.storekit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		9D5DD8622F4EE58A00ED842C /* price.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; name = price.storekit; path = ApplicationPad/price.storekit; sourceTree = "<group>"; };
 		9D794E7A2F3ACED3004EF6E3 /* ApplicationPad.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ApplicationPad.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -37,6 +39,7 @@
 		9D794E712F3ACED3004EF6E3 = {
 			isa = PBXGroup;
 			children = (
+				9D5DD8622F4EE58A00ED842C /* price.storekit */,
 				9D794E7C2F3ACED3004EF6E3 /* ApplicationPad */,
 				9D794E7B2F3ACED3004EF6E3 /* Products */,
 			);
@@ -118,6 +121,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				9D5DD8632F4EE58A00ED842C /* price.storekit in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

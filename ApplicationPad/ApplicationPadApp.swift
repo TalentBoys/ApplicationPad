@@ -10,6 +10,9 @@ import Carbon
 import LauncherCore
 
 class AppDelegate: NSObject, NSApplicationDelegate {
+    /// Set by ApplicationPadApp to allow opening the settings window
+    var openSettingsWindow: (() -> Void)?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Load saved hotkey settings
         let modifiers = UserDefaults.standard.object(forKey: "hotkeyModifiers") as? Int ?? (cmdKey | shiftKey)
@@ -17,19 +20,37 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Register global hotkey
         HotKeyManager.shared.register(keyCode: keyCode, modifiers: modifiers) {
-            LauncherPanel.shared.toggle()
+            self.showLauncherOrPaywall()
         }
 
-        // Show launcher on first launch
-        DispatchQueue.main.asyncAfter(deadline: .now()) {
-            LauncherPanel.shared.show()
+        // Check subscription on launch
+        Task {
+            await SubscriptionManager.shared.loadProduct()
+            await SubscriptionManager.shared.checkSubscription()
+
+            if SubscriptionManager.shared.isSubscribed {
+                LauncherPanel.shared.show()
+            } else {
+                // Not subscribed — open settings to paywall
+                openSettingsWindow?()
+            }
         }
     }
 
     // Click Dock icon to toggle Launcher
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        LauncherPanel.shared.toggle()
+        showLauncherOrPaywall()
         return false
+    }
+
+    private func showLauncherOrPaywall() {
+        if SubscriptionManager.shared.isSubscribed {
+            LauncherPanel.shared.toggle()
+        } else {
+            // Not subscribed — open settings to paywall
+            NSApp.activate(ignoringOtherApps: true)
+            openSettingsWindow?()
+        }
     }
 }
 
@@ -42,13 +63,25 @@ struct ApplicationPadApp: App {
         // Settings window
         Window("Settings", id: "settings") {
             SettingsView()
+                .onAppear {
+                    // Wire up AppDelegate's ability to open this window
+                    appDelegate.openSettingsWindow = {
+                        NSApp.activate(ignoringOtherApps: true)
+                        openWindow(id: "settings")
+                    }
+                }
         }
         .windowResizability(.contentSize)
 
         // Menu Bar
         MenuBarExtra("ApplicationPad", image: "MenuBarIcon") {
             Button("Open Launcher") {
-                LauncherPanel.shared.show()
+                if SubscriptionManager.shared.isSubscribed {
+                    LauncherPanel.shared.show()
+                } else {
+                    NSApp.activate(ignoringOtherApps: true)
+                    openWindow(id: "settings")
+                }
             }
             .keyboardShortcut("l", modifiers: .command)
 

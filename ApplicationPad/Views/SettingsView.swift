@@ -23,8 +23,26 @@ struct SettingsView: View {
 
     @State private var isRecordingHotkey = false
     @State private var showingResetAlert = false
+    @State private var selectedTab = SubscriptionManager.shared.isSubscribed ? 0 : 1
 
     var body: some View {
+        TabView(selection: $selectedTab) {
+            generalSettingsTab
+                .tabItem {
+                    Label("General", systemImage: "gear")
+                }
+                .tag(0)
+
+            PaywallView()
+                .tabItem {
+                    Label("Subscription", systemImage: "creditcard")
+                }
+                .tag(1)
+        }
+        .frame(width: 550, height: 780)
+    }
+
+    private var generalSettingsTab: some View {
         Form {
             Section {
                 HStack {
@@ -161,7 +179,6 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 550, height: 650)
         .alert("Reset App Layout", isPresented: $showingResetAlert) {
             Button("Cancel", role: .cancel) { }
             Button("Reset", role: .destructive) {

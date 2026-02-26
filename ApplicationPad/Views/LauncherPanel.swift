@@ -57,6 +57,7 @@ class LauncherPanel: NSPanel {
 
     func show() {
         guard !isAnimating else { return }
+        guard SubscriptionManager.shared.isSubscribed else { return }
         isAnimating = true
 
         if let screen = NSScreen.main {
