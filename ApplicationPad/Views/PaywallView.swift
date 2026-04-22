@@ -33,8 +33,8 @@ struct PaywallView: View {
         .subscriptionStoreControlStyle(.prominentPicker)
         .storeButton(.visible, for: .restorePurchases)
         .storeButton(.hidden, for: .cancellation)
-        .subscriptionStorePolicyDestination(url: URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdfla/")!, for: .termsOfService)
-        .subscriptionStorePolicyDestination(url: URL(string: "https://github.com/TalentBoys/ApplicationPad/blob/main/PRIVACY.md")!, for: .privacyPolicy)
+//        .subscriptionStorePolicyDestination(url: URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdfla/")!, for: .termsOfService)
+//        .subscriptionStorePolicyDestination(url: URL(string: "https://github.com/TalentBoys/ApplicationPad/blob/main/PRIVACY.md")!, for: .privacyPolicy)
         .frame(width: 500, height: 680)
         .task {
             await subscriptionManager.loadProduct()
