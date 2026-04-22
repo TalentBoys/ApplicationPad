@@ -23,18 +23,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self.showLauncherOrPaywall()
         }
 
-        // Check subscription on launch
-        Task {
-            await SubscriptionManager.shared.loadProduct()
-            await SubscriptionManager.shared.checkSubscription()
-
-            if SubscriptionManager.shared.isSubscribed {
-                LauncherPanel.shared.show()
-            } else {
-                // Not subscribed — open settings to paywall
-                openSettingsWindow?()
-            }
-        }
+        // Subscription disabled — launch directly
+        LauncherPanel.shared.show()
     }
 
     // Click Dock icon to toggle Launcher
@@ -44,13 +34,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showLauncherOrPaywall() {
-        if SubscriptionManager.shared.isSubscribed {
-            LauncherPanel.shared.toggle()
-        } else {
-            // Not subscribed — open settings to paywall
-            NSApp.activate(ignoringOtherApps: true)
-            openSettingsWindow?()
-        }
+        LauncherPanel.shared.toggle()
     }
 }
 
@@ -76,12 +60,7 @@ struct ApplicationPadApp: App {
         // Menu Bar
         MenuBarExtra("ApplicationPad", image: "MenuBarIcon") {
             Button("Open Launcher") {
-                if SubscriptionManager.shared.isSubscribed {
-                    LauncherPanel.shared.show()
-                } else {
-                    NSApp.activate(ignoringOtherApps: true)
-                    openWindow(id: "settings")
-                }
+                LauncherPanel.shared.show()
             }
             .keyboardShortcut("l", modifiers: .command)
 

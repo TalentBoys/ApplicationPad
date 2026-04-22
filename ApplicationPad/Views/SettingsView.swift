@@ -23,23 +23,10 @@ struct SettingsView: View {
 
     @State private var isRecordingHotkey = false
     @State private var showingResetAlert = false
-    @State private var selectedTab = SubscriptionManager.shared.isSubscribed ? 0 : 1
 
     var body: some View {
-        TabView(selection: $selectedTab) {
-            generalSettingsTab
-                .tabItem {
-                    Label("General", systemImage: "gear")
-                }
-                .tag(0)
-
-            PaywallView()
-                .tabItem {
-                    Label("Subscription", systemImage: "creditcard")
-                }
-                .tag(1)
-        }
-        .frame(width: 550, height: 780)
+        generalSettingsTab
+            .frame(width: 550, height: 780)
     }
 
     private var generalSettingsTab: some View {
@@ -174,6 +161,8 @@ struct SettingsView: View {
                 LabeledContent("Version", value: Bundle.main.appVersion)
                 LabeledContent("Build", value: Bundle.main.buildNumber)
                 LabeledContent("Author", value: "Kris Jin")
+                Link("Terms of Use (EULA)", destination: URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdfla/")!)
+                Link("Privacy Policy", destination: URL(string: "https://github.com/TalentBoys/ApplicationPad/blob/main/PRIVACY.md")!)
             } header: {
                 Text("About")
             }
