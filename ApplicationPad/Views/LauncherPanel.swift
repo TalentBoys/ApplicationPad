@@ -20,6 +20,7 @@ class LauncherPanel: NSPanel {
     static let shared = LauncherPanel()
 
     private var globalClickMonitor: Any?
+    private var deactivationObserver: Any?
 
     // Animation state
     private var isAnimating = false
@@ -73,8 +74,7 @@ class LauncherPanel: NSPanel {
         NSApp.activate(ignoringOtherApps: true)
 
         startGlobalClickMonitor()
-
-        // Trigger fade-in animation
+        startDeactivationObserver()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
             withAnimation(.easeOut(duration: 0.2)) {
                 LauncherAnimationState.shared.isContentVisible = true
@@ -91,8 +91,7 @@ class LauncherPanel: NSPanel {
         isAnimating = true
 
         stopGlobalClickMonitor()
-
-        // Trigger fade-out animation
+        stopDeactivationObserver()
         withAnimation(.easeOut(duration: 0.2)) {
             LauncherAnimationState.shared.isContentVisible = false
         }
@@ -132,6 +131,25 @@ class LauncherPanel: NSPanel {
         if let monitor = globalClickMonitor {
             NSEvent.removeMonitor(monitor)
             globalClickMonitor = nil
+        }
+    }
+
+    private func startDeactivationObserver() {
+        stopDeactivationObserver()
+        deactivationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didResignActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self = self, self.isVisible else { return }
+            self.close()
+        }
+    }
+
+    private func stopDeactivationObserver() {
+        if let observer = deactivationObserver {
+            NotificationCenter.default.removeObserver(observer)
+            deactivationObserver = nil
         }
     }
 }

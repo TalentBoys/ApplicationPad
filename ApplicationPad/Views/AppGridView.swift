@@ -1100,6 +1100,8 @@ struct FolderOverlayView: View {
     @State private var debugMousePosition: CGPoint = .zero
     @State private var debugMouseMonitor: Any?
 
+    @FocusState private var isNameFieldFocused: Bool
+
     init(folder: FolderItem, iconSize: CGFloat, screenSize: CGSize,
          externalDraggingItem: LauncherItem? = nil,
          externalDraggingOffset: CGSize = .zero,
@@ -1162,6 +1164,14 @@ struct FolderOverlayView: View {
         }
 
         return result
+    }
+
+    private func commitFolderName() {
+        isEditingName = false
+        guard folderName != folder.name else { return }
+        var updated = folder
+        updated.name = folderName
+        onFolderUpdate(updated)
     }
 
     private func finishFolderDragging() {
@@ -1439,16 +1449,24 @@ struct FolderOverlayView: View {
                             .textFieldStyle(.roundedBorder)
                             .frame(width: 200)
                             .multilineTextAlignment(.center)
+                            .focused($isNameFieldFocused)
                             .onSubmit {
+                                commitFolderName()
+                            }
+                            .onChange(of: isNameFieldFocused) { focused in
+                                if !focused { commitFolderName() }
+                            }
+                            .onExitCommand {
+                                folderName = folder.name
                                 isEditingName = false
-                                var updated = folder
-                                updated.name = folderName
-                                onFolderUpdate(updated)
+                            }
+                            .onAppear {
+                                isNameFieldFocused = true
                             }
                     } else {
                         Text(folderName)
                             .font(.headline)
-                            .foregroundColor(.white)
+                            .foregroundColor(.primary)
                             .onTapGesture {
                                 isEditingName = true
                             }
@@ -1636,6 +1654,10 @@ struct FolderOverlayView: View {
                     }
                 }
                 .padding(folderPadding / 2)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    if isEditingName { commitFolderName() }
+                }
                 .frame(width: folderWidth, height: folderHeight + (totalPages > 1 ? 20 : 0))
                 .background(folderBackground(folderWidth: folderWidth, folderHeight: folderHeight))
                 .overlay(folderDebugOverlay(folderWidth: folderWidth, folderHeight: folderHeight, geoSize: geo.size))
@@ -1846,7 +1868,7 @@ struct FolderAppItemView: View {
 
             Text(app.name)
                 .font(.caption)
-                .foregroundColor(.white)
+                .foregroundColor(.primary)
                 .lineLimit(1)
         }
         .padding(8)
