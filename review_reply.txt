@@ -1,0 +1,32 @@
+Dear App Review Team,
+
+Thank you for your feedback regarding Guideline 5.2.5.
+
+We would like to respectfully clarify that ApplicationPad is a utility app designed to provide an enhanced app launching experience. It is not intended to replicate or impersonate Apple's Launchpad, and we believe it is sufficiently differentiated in both functionality and purpose.
+
+Background: macOS 26 Launchpad changes
+
+With macOS 26, Apple has significantly simplified Launchpad by removing several features that many users relied on, including folder organization and custom app ordering. ApplicationPad was created to fill this gap for users who need these capabilities.
+
+Features not available in Launchpad:
+
+- Folder organization — Users can create folders to group apps by category, a feature that has been removed from Launchpad in macOS 26
+- Custom app ordering — Drag-to-reorder with cross-page overflow, allowing users to arrange apps in their preferred order and persist the layout, also removed from Launchpad in macOS 26
+- Pinyin search — Chinese-speaking users can find apps by typing pinyin initials (e.g., typing "wy" to find apps with matching pinyin), a feature Launchpad does not offer
+- Customizable grid layout — Users can adjust rows, columns, icon size, and padding to fit their workflow and screen size
+- Global hotkey activation — A fully configurable keyboard shortcut to invoke the launcher instantly, independent of system settings
+- Recent apps sorting — Frequently used apps are automatically prioritized for quick access
+- Editable folder names — Users can rename folders with inline editing for better organization
+
+Precedent on the Mac App Store
+
+Similar launcher utilities are available on the Mac App Store, such as Start and other app launcher tools, which share the common grid-based launcher paradigm. The grid layout is a standard UI pattern for app launchers and is not unique to Apple's Launchpad.
+
+Willingness to adjust
+
+That said, we are happy to make further UI adjustments to increase visual differentiation if needed. We can modify the app icon, background style, animations, and page indicators to ensure our app has a distinct visual identity. We would appreciate any specific guidance on which aspects you would like us to address.
+
+Thank you for your time and consideration.
+
+Best regards,
+Kris Jin

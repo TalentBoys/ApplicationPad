@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ApplicationPad - A Better App Launcher for macOS</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", sans-serif;
+            background: #0a0a0a;
+            color: #f5f5f7;
+            line-height: 1.6;
+        }
+        .container { max-width: 980px; margin: 0 auto; padding: 0 24px; }
+
+        /* Nav */
+        nav {
+            position: fixed; top: 0; left: 0; right: 0;
+            background: rgba(10, 10, 10, 0.85);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            z-index: 100;
+            padding: 16px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+        }
+        nav .container { display: flex; justify-content: space-between; align-items: center; }
+        nav .logo { font-size: 18px; font-weight: 600; }
+        .lang-switch {
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+            color: #f5f5f7;
+            padding: 6px 14px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+        .lang-switch:hover { background: rgba(255,255,255,0.2); }
+
+        /* Hero */
+        .hero {
+            text-align: center;
+            padding: 140px 0 80px;
+        }
+        .hero img.icon {
+            width: 128px; height: 128px;
+            border-radius: 24px;
+            margin-bottom: 24px;
+        }
+        .hero h1 { font-size: 48px; font-weight: 700; margin-bottom: 12px; }
+        .hero p { font-size: 20px; color: #a1a1a6; margin-bottom: 36px; }
+        .btn-download {
+            display: inline-block;
+            background: #2997ff;
+            color: #fff;
+            text-decoration: none;
+            padding: 14px 32px;
+            border-radius: 28px;
+            font-size: 17px;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+        .btn-download:hover { background: #0077ed; }
+        .btn-download-sub {
+            display: block;
+            margin-top: 12px;
+            font-size: 13px;
+            color: #a1a1a6;
+        }
+
+        /* Screenshots */
+        .screenshots {
+            padding: 60px 0;
+        }
+        .screenshots img {
+            width: 100%;
+            border-radius: 12px;
+            margin-bottom: 24px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+        }
+
+        /* Features */
+        .features {
+            padding: 80px 0;
+        }
+        .features h2 {
+            text-align: center;
+            font-size: 36px;
+            font-weight: 700;
+            margin-bottom: 48px;
+        }
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 32px;
+        }
+        .feature-card {
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 16px;
+            padding: 28px;
+        }
+        .feature-card h3 {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+        .feature-card p {
+            font-size: 15px;
+            color: #a1a1a6;
+        }
+
+        /* Footer */
+        footer {
+            border-top: 1px solid rgba(255,255,255,0.08);
+            padding: 40px 0;
+            text-align: center;
+            color: #6e6e73;
+            font-size: 14px;
+        }
+        footer a { color: #2997ff; text-decoration: none; }
+        footer a:hover { text-decoration: underline; }
+        footer .links { margin-bottom: 12px; }
+        footer .links a { margin: 0 12px; }
+
+        /* Responsive */
+        @media (max-width: 600px) {
+            .hero h1 { font-size: 32px; }
+            .hero p { font-size: 17px; }
+            .features h2 { font-size: 28px; }
+        }
+
+        /* Language toggle */
+        [data-lang="zh"] { display: none; }
+        body.zh [data-lang="zh"] { display: block; }
+        body.zh [data-lang="en"] { display: none; }
+        body.zh span[data-lang="zh"],
+        span[data-lang="en"] { display: inline; }
+        body.zh span[data-lang="en"] { display: none; }
+        span[data-lang="zh"] { display: none; }
+        body.zh span[data-lang="zh"] { display: inline; }
+    </style>
+</head>
+<body>
+    <nav>
+        <div class="container">
+            <div class="logo">ApplicationPad</div>
+            <button class="lang-switch" onclick="toggleLang()">
+                <span data-lang="en">中文</span>
+                <span data-lang="zh">English</span>
+            </button>
+        </div>
+    </nav>
+
+    <section class="hero">
+        <div class="container">
+            <img class="icon" src="images/icon.png" alt="ApplicationPad Icon">
+            <h1>ApplicationPad</h1>
+            <p>
+                <span data-lang="en">A better app launcher for macOS</span>
+                <span data-lang="zh">更好用的 macOS 应用启动器</span>
+            </p>
+            <a href="ApplicationPad-1.5.dmg" class="btn-download">
+                <span data-lang="en">Download for macOS</span>
+                <span data-lang="zh">下载 macOS 版</span>
+            </a>
+            <span class="btn-download-sub">
+                <span data-lang="en">macOS 14.0 or later &middot; Apple Silicon & Intel</span>
+                <span data-lang="zh">需要 macOS 14.0 或更高版本 &middot; 支持 Apple Silicon 和 Intel</span>
+            </span>
+        </div>
+    </section>
+
+    <section class="screenshots">
+        <div class="container">
+            <img src="images/main.png" alt="ApplicationPad main view">
+            <img src="images/folder.png" alt="ApplicationPad folder view">
+            <img src="images/settings.png" alt="ApplicationPad settings - fully customizable">
+        </div>
+    </section>
+
+    <section class="features">
+        <div class="container">
+            <h2>
+                <span data-lang="en">Features</span>
+                <span data-lang="zh">功能亮点</span>
+            </h2>
+            <div class="features-grid">
+                <div class="feature-card">
+                    <h3>
+                        <span data-lang="en">Folder Organization</span>
+                        <span data-lang="zh">文件夹整理</span>
+                    </h3>
+                    <p>
+                        <span data-lang="en">Create folders to group your apps by category. Drag apps together to organize your launcher.</span>
+                        <span data-lang="zh">创建文件夹，按类别归类应用。拖拽应用即可整理你的启动器。</span>
+                    </p>
+                </div>
+                <div class="feature-card">
+                    <h3>
+                        <span data-lang="en">Custom App Ordering</span>
+                        <span data-lang="zh">自定义排序</span>
+                    </h3>
+                    <p>
+                        <span data-lang="en">Drag to reorder apps across pages. Your layout is saved and persists between sessions.</span>
+                        <span data-lang="zh">跨页面拖拽排序，布局自动保存，下次打开依然保持。</span>
+                    </p>
+                </div>
+                <div class="feature-card">
+                    <h3>
+                        <span data-lang="en">Pinyin Search</span>
+                        <span data-lang="zh">拼音搜索</span>
+                    </h3>
+                    <p>
+                        <span data-lang="en">Find apps by typing pinyin initials. Type "wy" to quickly locate Chinese-named apps.</span>
+                        <span data-lang="zh">输入拼音首字母即可搜索应用，比如输入"wy"快速找到中文应用。</span>
+                    </p>
+                </div>
+                <div class="feature-card">
+                    <h3>
+                        <span data-lang="en">Customizable Layout</span>
+                        <span data-lang="zh">自定义布局</span>
+                    </h3>
+                    <p>
+                        <span data-lang="en">Adjust rows, columns, icon size, and padding to fit your screen and workflow.</span>
+                        <span data-lang="zh">自由调整行数、列数、图标大小和间距，适配你的屏幕和工作流。</span>
+                    </p>
+                </div>
+                <div class="feature-card">
+                    <h3>
+                        <span data-lang="en">Global Hotkey</span>
+                        <span data-lang="zh">全局快捷键</span>
+                    </h3>
+                    <p>
+                        <span data-lang="en">Launch instantly with a configurable keyboard shortcut. Default: Cmd+Shift+Space.</span>
+                        <span data-lang="zh">可自定义全局快捷键，一键呼出。默认：Cmd+Shift+Space。</span>
+                    </p>
+                </div>
+                <div class="feature-card">
+                    <h3>
+                        <span data-lang="en">Recent Apps</span>
+                        <span data-lang="zh">最近使用</span>
+                    </h3>
+                    <p>
+                        <span data-lang="en">Frequently used apps are automatically prioritized for quick access.</span>
+                        <span data-lang="zh">常用应用自动置顶，快速访问你最需要的工具。</span>
+                    </p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <footer>
+        <div class="container">
+            <div class="links">
+                <a href="mailto:513967622@qq.com">
+                    <span data-lang="en">Support</span>
+                    <span data-lang="zh">支持</span>
+                </a>
+                <a href="https://github.com/TalentBoys/ApplicationPad/issues">GitHub</a>
+            </div>
+            <p>&copy; 2026 Kris Jin. All rights reserved.</p>
+        </div>
+    </footer>
+
+    <script>
+        function toggleLang() {
+            document.body.classList.toggle('zh');
+            localStorage.setItem('lang', document.body.classList.contains('zh') ? 'zh' : 'en');
+        }
+        if (localStorage.getItem('lang') === 'zh') {
+            document.body.classList.add('zh');
+        }
+    </script>
+</body>
+</html>
