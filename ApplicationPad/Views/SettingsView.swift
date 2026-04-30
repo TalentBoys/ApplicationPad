@@ -8,6 +8,7 @@
 import SwiftUI
 import Carbon
 import LauncherCore
+import Sparkle
 
 struct SettingsView: View {
     @AppStorage("hotkeyModifiers") private var hotkeyModifiers: Int = cmdKey | shiftKey
@@ -20,20 +21,45 @@ struct SettingsView: View {
     @AppStorage("bottomPadding") private var bottomPadding: Double = 70
     @AppStorage("invertScroll") private var invertScroll: Bool = false
     @AppStorage("scrollSensitivity") private var scrollSensitivity: Double = 1.0
+    @AppStorage("appLanguage") private var selectedLanguage: String = "system"
+    @AppStorage("panelStyle") private var panelStyle: String = "default"
+    @AppStorage("hideDockIcon") private var hideDockIcon: Bool = false
+    @AppStorage("hideMenuBarIcon") private var hideMenuBarIcon: Bool = false
 
     @State private var isRecordingHotkey = false
     @State private var showingResetAlert = false
+    @State private var customPaths: [String] = LauncherSettings.customScanPaths
+    @State private var localization = LocalizationManager.shared
+
+    let updater: SPUUpdater?
 
     var body: some View {
         generalSettingsTab
-            .frame(width: 550, height: 780)
+            .frame(width: 550)
+            .id(localization.revision)
     }
 
     private var generalSettingsTab: some View {
         Form {
             Section {
+                Picker(L("Language"), selection: $selectedLanguage) {
+                    Text(L("System Default")).tag("system")
+                    Text("English").tag("en")
+                    Text("简体中文").tag("zh-Hans")
+                    Text("繁體中文").tag("zh-Hant")
+                    Text("日本語").tag("ja")
+                    Text("Español").tag("es")
+                }
+                .onChange(of: selectedLanguage) { _, newValue in
+                    LocalizationManager.shared.setLanguage(newValue)
+                }
+            } header: {
+                Text(L("Language"))
+            }
+
+            Section {
                 HStack {
-                    Text("Open Launcher")
+                    Text(L("Open Launcher"))
                     Spacer()
 
                     HotkeyRecorderView(
@@ -51,7 +77,7 @@ struct SettingsView: View {
                     }
                 }
 
-                Button("Reset to Default (⌘ + ⇧ + Space)") {
+                Button(L("Reset to Default (⌘ + ⇧ + Space)")) {
                     hotkeyModifiers = cmdKey | shiftKey
                     hotkeyKeyCode = kVK_Space
                     HotKeyManager.shared.unregister()
@@ -64,19 +90,97 @@ struct SettingsView: View {
                 }
                 .font(.caption)
             } header: {
-                Text("Hotkey")
+                Text(L("Hotkey"))
             }
 
             Section {
+                Toggle(L("Hide Dock Icon"), isOn: $hideDockIcon)
+                    .onChange(of: hideDockIcon) { _, newValue in
+                        NSApp.setActivationPolicy(newValue ? .accessory : .regular)
+                    }
+                Toggle(L("Hide Menu Bar Icon"), isOn: $hideMenuBarIcon)
+            } header: {
+                Text(L("Dock & Menu Bar"))
+            } footer: {
+                Text(L("You can always reopen the app using the keyboard shortcut."))
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            Section {
+                ForEach(["/Applications", "/System/Applications"], id: \.self) { path in
+                    HStack {
+                        Image(systemName: "folder")
+                            .foregroundColor(.secondary)
+                        Text(path)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                ForEach(Array(customPaths.enumerated()), id: \.offset) { index, path in
+                    HStack {
+                        Image(systemName: "folder.badge.plus")
+                        Text(path)
+                        Spacer()
+                        Button {
+                            LauncherSettings.removeCustomScanPath(at: index)
+                            customPaths = LauncherSettings.customScanPaths
+                        } label: {
+                            Image(systemName: "minus.circle.fill")
+                                .foregroundColor(.red)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+
+                Button(L("Add Directory...")) {
+                    let panel = NSOpenPanel()
+                    panel.canChooseFiles = false
+                    panel.canChooseDirectories = true
+                    panel.allowsMultipleSelection = false
+                    panel.message = L("Select a directory containing applications")
+                    if panel.runModal() == .OK, let url = panel.url {
+                        LauncherSettings.addCustomScanPath(url: url)
+                        customPaths = LauncherSettings.customScanPaths
+                    }
+                }
+            } header: {
+                Text(L("App Directories"))
+            } footer: {
+                Text(L("Add custom directories to scan for applications. Default directories cannot be removed."))
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            Section {
+                HStack(spacing: 16) {
+                    StyleCard(
+                        imageName: "StyleDefault",
+                        title: L("Default"),
+                        isSelected: panelStyle == "default"
+                    ) {
+                        panelStyle = "default"
+                    }
+
+                    StyleCard(
+                        imageName: "StyleClassic",
+                        title: L("Classic Launchpad"),
+                        isSelected: panelStyle == "classicBlur"
+                    ) {
+                        panelStyle = "classicBlur"
+                    }
+                }
+                .padding(.vertical, 8)
+
                 HStack {
-                    Text("Icon Size")
+                    Text(L("Icon Size"))
                     Slider(value: $iconSize, in: 48...160, step: 8)
                     Text("\(Int(iconSize))")
                         .frame(width: 50)
                 }
 
                 HStack {
-                    Text("Columns")
+                    Text(L("Columns"))
                     Spacer()
                     Picker("", selection: $columnsCount) {
                         ForEach(4...12, id: \.self) { count in
@@ -88,7 +192,7 @@ struct SettingsView: View {
                 }
 
                 HStack {
-                    Text("Rows")
+                    Text(L("Rows"))
                     Spacer()
                     Picker("", selection: $rowsCount) {
                         ForEach(3...8, id: \.self) { count in
@@ -100,36 +204,37 @@ struct SettingsView: View {
                 }
 
                 HStack {
-                    Text("Horizontal Padding")
+                    Text(L("Horizontal Padding"))
                     Slider(value: $horizontalPadding, in: 0...200, step: 10)
                     Text("\(Int(horizontalPadding))")
                         .frame(width: 50)
                 }
 
                 HStack {
-                    Text("Top Padding")
+                    Text(L("Top Padding"))
                     Slider(value: $topPadding, in: 0...200, step: 10)
                     Text("\(Int(topPadding))")
                         .frame(width: 50)
                 }
 
                 HStack {
-                    Text("Bottom Padding")
+                    Text(L("Bottom Padding"))
                     Slider(value: $bottomPadding, in: 0...200, step: 10)
                     Text("\(Int(bottomPadding))")
                         .frame(width: 50)
                 }
 
-                Toggle("Invert Scroll Direction", isOn: $invertScroll)
+                Toggle(L("Invert Scroll Direction"), isOn: $invertScroll)
 
                 HStack {
-                    Text("Scroll Sensitivity")
+                    Text(L("Scroll Sensitivity"))
                     Slider(value: $scrollSensitivity, in: 0.5...3.0, step: 0.1)
                     Text(String(format: "%.1f", scrollSensitivity))
                         .frame(width: 50)
                 }
 
-                Button("Reset to Default") {
+                Button(L("Reset to Default")) {
+                    panelStyle = "default"
                     iconSize = 112
                     columnsCount = 6
                     rowsCount = 5
@@ -141,40 +246,50 @@ struct SettingsView: View {
                 }
                 .font(.caption)
             } header: {
-                Text("Appearance")
+                Text(L("Appearance"))
             }
 
             Section {
-                Button("Reset App Layout") {
+                Button(L("Reset App Layout")) {
                     showingResetAlert = true
                 }
                 .foregroundColor(.red)
             } header: {
-                Text("Layout")
+                Text(L("Layout"))
             } footer: {
-                Text("This will remove all folders and reset app positions to default alphabetical order.")
+                Text(L("This will remove all folders and reset app positions to default alphabetical order."))
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
 
             Section {
-                LabeledContent("Version", value: Bundle.main.appVersion)
-                LabeledContent("Build", value: Bundle.main.buildNumber)
-                LabeledContent("Author", value: "Kris Jin")
-                Link("Terms of Use (EULA)", destination: URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdfla/")!)
-                Link("Privacy Policy", destination: URL(string: "https://github.com/TalentBoys/ApplicationPad/blob/main/PRIVACY.md")!)
+                LabeledContent(L("Version"), value: Bundle.main.appVersion)
+                LabeledContent(L("Build"), value: Bundle.main.buildNumber)
+                LabeledContent(L("Author"), value: "Kris Jin")
+                if let updater {
+                    CheckForUpdatesView(updater: updater)
+                }
+                Link(L("Terms of Use (EULA)"), destination: URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdfla/")!)
+                Link(L("Privacy Policy"), destination: URL(string: "https://github.com/TalentBoys/ApplicationPad/blob/main/PRIVACY.md")!)
             } header: {
-                Text("About")
+                Text(L("About"))
+            }
+
+            Section {
+                Button(L("Quit ApplicationPad")) {
+                    NSApp.terminate(nil)
+                }
+                .foregroundColor(.red)
             }
         }
         .formStyle(.grouped)
-        .alert("Reset App Layout", isPresented: $showingResetAlert) {
-            Button("Cancel", role: .cancel) { }
-            Button("Reset", role: .destructive) {
+        .alert(L("Reset App Layout"), isPresented: $showingResetAlert) {
+            Button(L("Cancel"), role: .cancel) { }
+            Button(L("Reset"), role: .destructive) {
                 LauncherSettings.resetGridLayout()
             }
         } message: {
-            Text("This will remove all folders and reset app positions to default alphabetical order. This action cannot be undone.")
+            Text(L("This will remove all folders and reset app positions to default alphabetical order. This action cannot be undone."))
         }
     }
 }
@@ -189,14 +304,14 @@ struct HotkeyRecorderView: View {
 
     var body: some View {
         HStack {
-            Text(isRecording ? "Press shortcut..." : hotkeyString)
+            Text(isRecording ? L("Press shortcut...") : hotkeyString)
                 .frame(minWidth: 120)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
                 .background(isRecording ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.2))
                 .cornerRadius(6)
 
-            Button(isRecording ? "Cancel" : "Change") {
+            Button(isRecording ? L("Cancel") : L("Change")) {
                 if isRecording {
                     stopRecording()
                 } else {
@@ -249,7 +364,7 @@ struct HotkeyRecorderView: View {
 
     private func keyCodeToString(_ code: Int) -> String {
         switch code {
-        case kVK_Space: return "Space"
+        case kVK_Space: return L("Space")
         case kVK_Return: return "↩"
         case kVK_Tab: return "⇥"
         case kVK_Delete: return "⌫"
@@ -282,7 +397,7 @@ struct HotkeyRecorderView: View {
 }
 
 #Preview {
-    SettingsView()
+    SettingsView(updater: SPUStandardUpdaterController(startingUpdater: false, updaterDelegate: nil, userDriverDelegate: nil).updater)
 }
 
 extension Bundle {
@@ -292,5 +407,36 @@ extension Bundle {
 
     var buildNumber: String {
         infoDictionary?["CFBundleVersion"] as? String ?? "1"
+    }
+}
+
+struct StyleCard: View {
+    let imageName: String
+    let title: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 8) {
+                Image(imageName)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(height: 120)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 3)
+                    )
+
+                HStack(spacing: 4) {
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                        .foregroundColor(isSelected ? .accentColor : .secondary)
+                    Text(title)
+                        .font(.caption)
+                }
+            }
+        }
+        .buttonStyle(.plain)
     }
 }

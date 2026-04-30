@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>ApplicationPad Updates</title>
+    <link>https://applicationpad.cfapps.eu12.hana.ondemand.com/appcast.xml</link>
+    <language>en</language>
+    <item>
+      <title>Version 2.2</title>
+      <pubDate>Tue, 29 Apr 2026 11:00:00 +0000</pubDate>
+      <sparkle:version>7</sparkle:version>
+      <sparkle:shortVersionString>2.2</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+        <h2>What's New in 2.2</h2>
+        <ul>
+          <li>Website SEO optimization for better discoverability</li>
+          <li>Improved localization support</li>
+        </ul>
+      ]]></description>
+      <enclosure
+        url="https://applicationpad.cfapps.eu12.hana.ondemand.com/ApplicationPad-2.2.zip"
+        type="application/octet-stream"
+        sparkle:edSignature="kSDRwLIlw/RR+ZHsejQwbDNDRQtOq4UE7Z7LhqNMpHS8jxCWSLbQaB2+p175OFECsiHSkiG8CJ43Kn2fJQJFCw=="
+        length="8466781"
+      />
+    </item>
+    <item>
+      <title>Version 2.1</title>
+      <pubDate>Tue, 29 Apr 2026 10:00:00 +0000</pubDate>
+      <sparkle:version>6</sparkle:version>
+      <sparkle:shortVersionString>2.1</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+        <h2>What's New in 2.1</h2>
+        <ul>
+          <li>Website SEO optimization for better discoverability</li>
+          <li>Improved localization support</li>
+        </ul>
+      ]]></description>
+      <enclosure
+        url="https://applicationpad.cfapps.eu12.hana.ondemand.com/ApplicationPad-2.1.zip"
+        type="application/octet-stream"
+        sparkle:edSignature="AaHbzffuwwNmobL/EYoXsEW10WFwvkTkE7BfCka9lFPn7jQnVG5kLp6Ailsr2jiKRSPXksstFuIWzp6LZT8FAw=="
+        length="8450036"
+      />
+    </item>
+    <item>
+      <title>Version 2.0</title>
+      <pubDate>Mon, 28 Apr 2026 12:30:00 +0000</pubDate>
+      <sparkle:version>5</sparkle:version>
+      <sparkle:shortVersionString>2.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+        <h2>What's New in 2.0</h2>
+        <ul>
+          <li>Improved scroll handling for trackpad, mouse drag, and scroll wheel</li>
+        </ul>
+      ]]></description>
+      <enclosure
+        url="https://applicationpad.cfapps.eu12.hana.ondemand.com/ApplicationPad-2.0.zip"
+        type="application/octet-stream"
+        sparkle:edSignature="ygf8p/zV2KjRreqSXpA5lM9gn0QeqxzH0OfUGXx+Y7Fof0Ntag1gYWoHGufCNRgrAqVflKX/pb6o5X59ODWgBg=="
+        length="6943426"
+      />
+    </item>
+    <item>
+      <title>Version 1.9</title>
+      <pubDate>Mon, 28 Apr 2026 11:25:00 +0000</pubDate>
+      <sparkle:version>4</sparkle:version>
+      <sparkle:shortVersionString>1.9</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+        <h2>What's New in 1.9</h2>
+        <ul>
+          <li>Auto-update test release</li>
+        </ul>
+      ]]></description>
+      <enclosure
+        url="https://applicationpad.cfapps.eu12.hana.ondemand.com/ApplicationPad-1.9.zip"
+        type="application/octet-stream"
+        sparkle:edSignature="0YOwJrHgquvu8ReCRea9NiKZxsP4+Y4L8ReRuluOyfbb1ZRQqTtfTkpJmT6a/BfMGQfPAdFoGht9dG45R+6JBA=="
+        length="6946629"
+      />
+    </item>
+    <item>
+      <title>Version 1.8</title>
+      <pubDate>Tue, 28 Apr 2026 11:15:00 +0000</pubDate>
+      <sparkle:version>3</sparkle:version>
+      <sparkle:shortVersionString>1.8</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+        <h2>What's New in 1.8</h2>
+        <ul>
+          <li>Improved auto-update reliability</li>
+        </ul>
+      ]]></description>
+      <enclosure
+        url="https://applicationpad.cfapps.eu12.hana.ondemand.com/ApplicationPad-1.8.zip"
+        type="application/octet-stream"
+        sparkle:edSignature="2iIcCqlDnBa9j3S8cmdjVFV6pXAqGsQrEFj7Evr0AcU3EEyeXVq1Fanaq5NC+AswSznQ6S6doIJxlzUzXxi+Bw=="
+        length="6945429"
+      />
+    </item>
+    <item>
+      <title>Version 1.7</title>
+      <pubDate>Tue, 28 Apr 2026 11:00:00 +0000</pubDate>
+      <sparkle:version>2</sparkle:version>
+      <sparkle:shortVersionString>1.7</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+        <h2>What's New in 1.7</h2>
+        <ul>
+          <li>Test auto-update</li>
+        </ul>
+      ]]></description>
+      <enclosure
+        url="https://applicationpad.cfapps.eu12.hana.ondemand.com/ApplicationPad-1.7.zip"
+        type="application/octet-stream"
+        sparkle:edSignature="3k/P5ZfrTELw63XL1macSfzUzxZaoebBxgJJTwG+NcUqzHnQm2D0ULiKDoxl8+69PelXYHK21u71DXo6DkbADg=="
+        length="6945422"
+      />
+    </item>
+    <item>
+      <title>Version 1.6</title>
+      <pubDate>Tue, 28 Apr 2026 10:45:39 +0000</pubDate>
+      <sparkle:version>1</sparkle:version>
+      <sparkle:shortVersionString>1.6</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+        <h2>What's New in 1.6</h2>
+        <ul>
+          <li>Added Sparkle auto-update support</li>
+          <li>Improved folder text readability</li>
+          <li>Folder name saves on blur</li>
+          <li>App hides when another app takes focus</li>
+          <li>Multi-language support (EN, 简体中文, 繁體中文, 日本語, Español)</li>
+        </ul>
+      ]]></description>
+      <enclosure
+        url="https://applicationpad.cfapps.eu12.hana.ondemand.com/ApplicationPad-1.6.dmg"
+        type="application/x-apple-diskimage"
+        sparkle:edSignature="4Q5vjotjPZ6FjnWA4oxR44KerOzBH24neMPuuo/kJzqLYItZpT1m1d8w4CAtpldE1idXooNSGOOTAs55QlRQDw=="
+        length="7214312"
+      />
+    </item>
+  </channel>
+</rss>

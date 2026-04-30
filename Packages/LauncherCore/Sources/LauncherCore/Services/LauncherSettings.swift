@@ -44,13 +44,23 @@ public struct LauncherSettings {
     }
 
     public static var scrollSensitivity: CGFloat {
-        get { CGFloat(UserDefaults.standard.object(forKey: "scrollSensitivity") as? Double ?? 1.0) }
+        get { CGFloat(UserDefaults.standard.object(forKey: "scrollSensitivity") as? Double ?? 2.0) }
         set { UserDefaults.standard.set(Double(newValue), forKey: "scrollSensitivity") }
     }
 
     public static var lastPage: Int {
         get { UserDefaults.standard.integer(forKey: "lastPage") }
         set { UserDefaults.standard.set(newValue, forKey: "lastPage") }
+    }
+
+    public static var language: String {
+        get { UserDefaults.standard.string(forKey: "appLanguage") ?? "system" }
+        set { UserDefaults.standard.set(newValue, forKey: "appLanguage") }
+    }
+
+    public static var panelStyle: String {
+        get { UserDefaults.standard.string(forKey: "panelStyle") ?? "default" }
+        set { UserDefaults.standard.set(newValue, forKey: "panelStyle") }
     }
 
     public static var appsPerPage: Int {
@@ -174,22 +184,30 @@ public struct LauncherSettings {
     }
 
     public static func applyCustomOrder(to apps: [AppItem]) -> [LauncherItem] {
+        // Extract the settings item from apps list
+        let settingsApp = apps.first { $0.isSettingsItem }
+        let appsWithoutSettings = apps.filter { !$0.isSettingsItem }
+
+        var result: [LauncherItem]
+
         // Try to load saved grid items first
         if let savedItems = loadGridItems() {
-            var result: [LauncherItem] = []
-            var remainingApps = apps
+            result = []
+            var remainingApps = appsWithoutSettings
 
             for savedItem in savedItems {
                 switch savedItem {
                 case .app(let savedApp):
+                    if savedApp.isSettingsItem { continue }
                     // Find matching app by URL
                     if let index = remainingApps.firstIndex(where: { $0.url == savedApp.url }) {
                         result.append(.app(remainingApps.remove(at: index)))
                     }
                 case .folder(let folder):
-                    // Rebuild folder with current app instances
+                    // Rebuild folder with current app instances (settings item cannot be in folders)
                     var updatedApps: [AppItem] = []
                     for folderApp in folder.apps {
+                        if folderApp.isSettingsItem { continue }
                         if let index = remainingApps.firstIndex(where: { $0.url == folderApp.url }) {
                             updatedApps.append(remainingApps.remove(at: index))
                         }
@@ -208,13 +226,18 @@ public struct LauncherSettings {
             for app in remainingApps {
                 result.append(.app(app))
             }
-
-            return result
+        } else {
+            // No saved items, return apps sorted alphabetically
+            let sortedApps = appsWithoutSettings.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            result = sortedApps.map { .app($0) }
         }
 
-        // No saved items, return apps sorted alphabetically
-        let sortedApps = apps.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-        return sortedApps.map { .app($0) }
+        // Always pin settings item at the first position
+        if let settings = settingsApp {
+            result.insert(.app(settings), at: 0)
+        }
+
+        return result
     }
 
     // Reset grid layout to default (clear all custom order and folders)
@@ -223,6 +246,109 @@ public struct LauncherSettings {
         UserDefaults.standard.removeObject(forKey: "customAppOrder")
         FolderIconCache.shared.clearCache()
         IconCache.shared.clearCache()
+        NotificationCenter.default.post(name: .gridLayoutDidReset, object: nil)
+    }
+
+    // MARK: - Custom Scan Directories
+
+    private static let customScanPathsKey = "customScanPaths"
+    private static let customScanBookmarksKey = "customScanBookmarks"
+
+    public static var customScanPaths: [String] {
+        get { UserDefaults.standard.stringArray(forKey: customScanPathsKey) ?? [] }
+        set { UserDefaults.standard.set(newValue, forKey: customScanPathsKey) }
+    }
+
+    private static var customScanBookmarks: [Data] {
+        get {
+            (UserDefaults.standard.array(forKey: customScanBookmarksKey) as? [Data]) ?? []
+        }
+        set { UserDefaults.standard.set(newValue, forKey: customScanBookmarksKey) }
+    }
+
+    public static func addCustomScanPath(url: URL) {
+        guard let bookmarkData = try? url.bookmarkData(
+            options: .withSecurityScope,
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        ) else { return }
+
+        var paths = customScanPaths
+        let path = url.path
+        guard !paths.contains(path) else { return }
+
+        paths.append(path)
+        customScanPaths = paths
+
+        var bookmarks = customScanBookmarks
+        bookmarks.append(bookmarkData)
+        customScanBookmarks = bookmarks
+
+        NotificationCenter.default.post(name: .customScanPathsChanged, object: nil)
+    }
+
+    public static func removeCustomScanPath(at index: Int) {
+        var paths = customScanPaths
+        var bookmarks = customScanBookmarks
+        guard index >= 0, index < paths.count else { return }
+
+        paths.remove(at: index)
+        customScanPaths = paths
+
+        if index < bookmarks.count {
+            bookmarks.remove(at: index)
+            customScanBookmarks = bookmarks
+        }
+
+        NotificationCenter.default.post(name: .customScanPathsChanged, object: nil)
+    }
+
+    public static func resolveBookmarks() -> [URL] {
+        var resolved: [URL] = []
+        var bookmarks = customScanBookmarks
+        var paths = customScanPaths
+        var staleIndices: [Int] = []
+
+        for (index, data) in bookmarks.enumerated() {
+            var isStale = false
+            guard let url = try? URL(
+                resolvingBookmarkData: data,
+                options: .withSecurityScope,
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            ) else {
+                staleIndices.append(index)
+                continue
+            }
+
+            if isStale {
+                if let newData = try? url.bookmarkData(
+                    options: .withSecurityScope,
+                    includingResourceValuesForKeys: nil,
+                    relativeTo: nil
+                ) {
+                    bookmarks[index] = newData
+                } else {
+                    staleIndices.append(index)
+                    continue
+                }
+            }
+
+            resolved.append(url)
+        }
+
+        if !staleIndices.isEmpty {
+            for index in staleIndices.reversed() {
+                bookmarks.remove(at: index)
+                if index < paths.count {
+                    paths.remove(at: index)
+                }
+            }
+            customScanBookmarks = bookmarks
+            customScanPaths = paths
+        }
+
+        return resolved
     }
 
     // Legacy support - keep old methods for compatibility

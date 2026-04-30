@@ -8,12 +8,22 @@
 import SwiftUI
 import Carbon
 import LauncherCore
+import Sparkle
 
 class AppDelegate: NSObject, NSApplicationDelegate {
-    /// Set by ApplicationPadApp to allow opening the settings window
-    var openSettingsWindow: (() -> Void)?
+    static var shared: AppDelegate?
+
+    func openSettings() {
+        LauncherPanel.shared.showSettings()
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        Self.shared = self
+
+        // Initialize localization
+        LocalizationManager.shared.updateBundle()
+        LocalizationManager.shared.updateCoreStrings()
+
         // Load saved hotkey settings
         let modifiers = UserDefaults.standard.object(forKey: "hotkeyModifiers") as? Int ?? (cmdKey | shiftKey)
         let keyCode = UserDefaults.standard.object(forKey: "hotkeyKeyCode") as? Int ?? kVK_Space
@@ -25,6 +35,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Subscription disabled — launch directly
         LauncherPanel.shared.show()
+
+        // Hide Dock icon after UI is ready
+        if UserDefaults.standard.bool(forKey: "hideDockIcon") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                NSApp.setActivationPolicy(.accessory)
+            }
+        }
     }
 
     // Click Dock icon to toggle Launcher
@@ -41,40 +58,38 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct ApplicationPadApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    @Environment(\.openWindow) private var openWindow
+    @State private var localization = LocalizationManager.shared
+    @AppStorage("hideMenuBarIcon") private var hideMenuBarIcon: Bool = false
+
+    private let updaterController: SPUStandardUpdaterController
+
+    init() {
+        updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
+    }
 
     var body: some Scene {
-        // Settings window
-        Window("Settings", id: "settings") {
-            SettingsView()
-                .onAppear {
-                    // Wire up AppDelegate's ability to open this window
-                    appDelegate.openSettingsWindow = {
-                        NSApp.activate(ignoringOtherApps: true)
-                        openWindow(id: "settings")
-                    }
-                }
-        }
-        .windowResizability(.contentSize)
-
         // Menu Bar
-        MenuBarExtra("ApplicationPad", image: "MenuBarIcon") {
-            Button("Open Launcher") {
+        MenuBarExtra("ApplicationPad", image: "MenuBarIcon", isInserted: Binding(
+            get: { !hideMenuBarIcon },
+            set: { hideMenuBarIcon = !$0 }
+        )) {
+            Button(L("Open Launcher")) {
                 LauncherPanel.shared.show()
             }
             .keyboardShortcut("l", modifiers: .command)
 
             Divider()
 
-            Button("Settings...") {
-                NSApp.activate(ignoringOtherApps: true)
-                openWindow(id: "settings")
+            Button(L("Settings...")) {
+                LauncherPanel.shared.showSettings()
             }
             .keyboardShortcut(",", modifiers: .command)
 
+            CheckForUpdatesView(updater: updaterController.updater)
+
             Divider()
 
-            Button("Quit") {
+            Button(L("Quit")) {
                 NSApp.terminate(nil)
             }
             .keyboardShortcut("q", modifiers: .command)

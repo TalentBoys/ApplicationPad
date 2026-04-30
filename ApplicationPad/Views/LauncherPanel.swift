@@ -9,11 +9,14 @@ import AppKit
 import SwiftUI
 import Combine
 import LauncherCore
+import Sparkle
 
 // Shared state for launcher visibility animation
 class LauncherAnimationState: ObservableObject {
     static let shared = LauncherAnimationState()
     @Published var isContentVisible = false
+    @Published var isClassicMode = false
+    @Published var showSettings = false
 }
 
 class LauncherPanel: NSPanel {
@@ -37,6 +40,7 @@ class LauncherPanel: NSPanel {
         self.backgroundColor = .clear
         self.isOpaque = false
         self.hasShadow = false
+        self.hidesOnDeactivate = false
         self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
         updateContent()
@@ -50,8 +54,19 @@ class LauncherPanel: NSPanel {
 
     func toggle() {
         if isVisible && !isAnimating {
-            close()
+            if LauncherAnimationState.shared.showSettings {
+                LauncherAnimationState.shared.showSettings = false
+            } else {
+                close()
+            }
         } else if !isVisible && !isAnimating {
+            show()
+        }
+    }
+
+    func showSettings() {
+        LauncherAnimationState.shared.showSettings = true
+        if !isVisible {
             show()
         }
     }
@@ -61,45 +76,83 @@ class LauncherPanel: NSPanel {
 //        guard SubscriptionManager.shared.isSubscribed else { return }
         isAnimating = true
 
-        if let screen = NSScreen.main {
-            setFrame(screen.frame, display: true)
+        let mouseLocation = NSEvent.mouseLocation
+        let targetScreen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) }) ?? NSScreen.main
+        let isClassic = UserDefaults.standard.string(forKey: "panelStyle") == "classicBlur"
+
+        if let screen = targetScreen {
+            // In classic mode, cover the entire screen including menu bar area
+            let frame = isClassic ? screen.frame : screen.frame
+            setFrame(frame, display: true)
         }
+
+        // Always keep window transparent — DesktopBlurBackground provides the backdrop
+        self.backgroundColor = .clear
+        self.isOpaque = false
+
         // Reset to invisible state before showing
         LauncherAnimationState.shared.isContentVisible = false
+        LauncherAnimationState.shared.isClassicMode = isClassic
 
         // First make window visible
         makeKeyAndOrderFront(nil)
 
-        // Then activate the app to ensure focus
-        NSApp.activate(ignoringOtherApps: true)
+        // Only activate app when Dock icon is visible (regular mode).
+        // In accessory mode the panel (popUpMenu level) receives events without activation.
+        if !UserDefaults.standard.bool(forKey: "hideDockIcon") {
+            NSApp.activate(ignoringOtherApps: true)
+        }
 
         startGlobalClickMonitor()
         startDeactivationObserver()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
-            withAnimation(.easeOut(duration: 0.2)) {
+            withAnimation(isClassic ? .easeOut(duration: 0.25) : .easeOut(duration: 0.2)) {
                 LauncherAnimationState.shared.isContentVisible = true
             }
-            self.isAnimating = false
 
             // Ensure window is key after animation starts
             self.makeFirstResponder(self.contentView)
+
+            // After animation completes, make window opaque to fully hide desktop
+            let animDuration = isClassic ? 0.25 : 0.2
+            DispatchQueue.main.asyncAfter(deadline: .now() + animDuration) {
+                if isClassic {
+                    self.backgroundColor = .black
+                    self.isOpaque = true
+                }
+                self.isAnimating = false
+            }
         }
     }
 
     override func close() {
-        guard !isAnimating else { return }
+        let closeStart = CFAbsoluteTimeGetCurrent()
+        print("⏱️ [PANEL] close() entered at: \(closeStart)")
+        guard !isAnimating else {
+            print("⏱️ [PANEL] skipped — already animating")
+            return
+        }
         isAnimating = true
 
         stopGlobalClickMonitor()
         stopDeactivationObserver()
-        withAnimation(.easeOut(duration: 0.2)) {
+        LauncherAnimationState.shared.showSettings = false
+        let isClassic = LauncherAnimationState.shared.isClassicMode
+
+        // Restore transparent window before animating out, so zoom-out doesn't show black edges
+        self.backgroundColor = .clear
+        self.isOpaque = false
+
+        withAnimation(isClassic ? .easeIn(duration: 0.2) : .easeOut(duration: 0.2)) {
             LauncherAnimationState.shared.isContentVisible = false
         }
+        print("⏱️ [PANEL] animation started at: \(CFAbsoluteTimeGetCurrent()) (+\(CFAbsoluteTimeGetCurrent() - closeStart)s)")
 
         // Wait for animation to complete before hiding window
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
             self.orderOut(nil)
             self.isAnimating = false
+            print("⏱️ [PANEL] orderOut done at: \(CFAbsoluteTimeGetCurrent()) (+\(CFAbsoluteTimeGetCurrent() - closeStart)s)")
         }
     }
 
@@ -136,6 +189,9 @@ class LauncherPanel: NSPanel {
 
     private func startDeactivationObserver() {
         stopDeactivationObserver()
+        if UserDefaults.standard.bool(forKey: "hideDockIcon") {
+            return
+        }
         deactivationObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didResignActiveNotification,
             object: nil,
@@ -156,12 +212,62 @@ class LauncherPanel: NSPanel {
 
 struct LauncherContentView: View {
     @ObservedObject private var animationState = LauncherAnimationState.shared
+    @AppStorage("panelStyle") private var panelStyle: String = "default"
+
+    private var hiddenScale: CGFloat {
+        animationState.isClassicMode ? 1.15 : 0.95
+    }
 
     var body: some View {
         AppGridView()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(VisualEffectView())
+            .allowsHitTesting(!animationState.showSettings)
+            .disabled(animationState.showSettings)
+            .overlay {
+                if animationState.showSettings {
+                    Color.black.opacity(0.4)
+                        .ignoresSafeArea()
+                        .onTapGesture {
+                            animationState.showSettings = false
+                        }
+
+                    VStack(spacing: 0) {
+                        HStack {
+                            Button {
+                                animationState.showSettings = false
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "chevron.left")
+                                    Text(L("Back"))
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundColor(.accentColor)
+                            Spacer()
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.top, 16)
+                        .padding(.bottom, 8)
+
+                        SettingsView(updater: nil)
+                    }
+                    .frame(width: 580, height: 880)
+                    .background(.regularMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .shadow(radius: 20)
+                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                }
+            }
+            .animation(.easeOut(duration: 0.2), value: animationState.showSettings)
+            .background {
+                if panelStyle == "classicBlur" {
+                    DesktopBlurBackground()
+                } else {
+                    VisualEffectView()
+                }
+            }
             .opacity(animationState.isContentVisible ? 1 : 0)
-            .scaleEffect(animationState.isContentVisible ? 1 : 0.95)
+            .scaleEffect(animationState.isContentVisible ? 1 : hiddenScale)
+            .preferredColorScheme(panelStyle == "classicBlur" ? .dark : .light)
     }
 }

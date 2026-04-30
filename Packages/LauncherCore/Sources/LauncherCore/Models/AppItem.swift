@@ -9,11 +9,21 @@ import Foundation
 import AppKit
 
 public struct AppItem: Identifiable, Equatable, Codable, Sendable {
+    public static let settingsURL = URL(string: "applicationpad://settings")!
+
     public let id: UUID
     public let name: String
     public let url: URL
     public let pinyinName: String      // 完整拼音: wangyiyoudaocidian
     public let pinyinInitials: String  // 首字母: wyydcd
+
+    public var isSettingsItem: Bool {
+        url == Self.settingsURL
+    }
+
+    public var displayName: String {
+        isSettingsItem ? LauncherCoreStrings.settingsItemName : name
+    }
 
     @MainActor
     public var icon: NSImage {
@@ -21,10 +31,12 @@ public struct AppItem: Identifiable, Equatable, Codable, Sendable {
     }
 
     public var lastUsed: Date {
-        UserDefaults.standard.object(forKey: url.path) as? Date ?? .distantPast
+        guard !isSettingsItem else { return .distantPast }
+        return UserDefaults.standard.object(forKey: url.path) as? Date ?? .distantPast
     }
 
     public func markUsed() {
+        guard !isSettingsItem else { return }
         UserDefaults.standard.set(Date(), forKey: url.path)
     }
 

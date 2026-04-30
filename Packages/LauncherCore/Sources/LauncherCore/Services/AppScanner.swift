@@ -13,11 +13,10 @@ public final class AppScanner {
         let paths = [
             "/Applications",
             "/System/Applications",
-            fm.homeDirectoryForCurrentUser
-                .appendingPathComponent("Applications").path
         ]
 
         var result: [AppItem] = []
+        var seenURLs = Set<URL>()
 
         for path in paths {
             guard let urls = try? fm.contentsOfDirectory(
@@ -27,6 +26,30 @@ public final class AppScanner {
             ) else { continue }
 
             for url in urls where url.pathExtension == "app" {
+                guard !seenURLs.contains(url) else { continue }
+                seenURLs.insert(url)
+                let name = url.deletingPathExtension().lastPathComponent
+                let pinyinName = pinyin(name).lowercased()
+                let initials = pinyinInitials(name).lowercased()
+                result.append(AppItem(name: name, url: url, pinyinName: pinyinName, pinyinInitials: initials))
+            }
+        }
+
+        // Scan custom directories via security-scoped bookmarks
+        let customURLs = LauncherSettings.resolveBookmarks()
+        for dirURL in customURLs {
+            let accessing = dirURL.startAccessingSecurityScopedResource()
+            defer { if accessing { dirURL.stopAccessingSecurityScopedResource() } }
+
+            guard let urls = try? fm.contentsOfDirectory(
+                at: dirURL,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+            ) else { continue }
+
+            for url in urls where url.pathExtension == "app" {
+                guard !seenURLs.contains(url) else { continue }
+                seenURLs.insert(url)
                 let name = url.deletingPathExtension().lastPathComponent
                 let pinyinName = pinyin(name).lowercased()
                 let initials = pinyinInitials(name).lowercased()
@@ -35,11 +58,22 @@ public final class AppScanner {
         }
 
         // Sort by recent use, then by name
-        return result.sorted {
+        result.sort {
             if $0.lastUsed != $1.lastUsed {
                 return $0.lastUsed > $1.lastUsed
             }
             return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
         }
+
+        // Inject ApplicationPad Settings item
+        let settingsName = LauncherCoreStrings.settingsItemName
+        result.append(AppItem(
+            name: settingsName,
+            url: AppItem.settingsURL,
+            pinyinName: pinyin(settingsName).lowercased(),
+            pinyinInitials: pinyinInitials(settingsName).lowercased()
+        ))
+
+        return result
     }
 }

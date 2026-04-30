@@ -18,3 +18,8 @@ public extension Int {
         self == 0 ? nil : self
     }
 }
+
+public extension Notification.Name {
+    static let customScanPathsChanged = Notification.Name("customScanPathsChanged")
+    static let gridLayoutDidReset = Notification.Name("gridLayoutDidReset")
+}

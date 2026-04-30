@@ -30,6 +30,14 @@ public enum LauncherItem: Identifiable, Equatable {
         }
     }
 
+    public var displayName: String {
+        switch self {
+        case .app(let app): return app.displayName
+        case .folder(let folder): return folder.name
+        case .empty: return ""
+        }
+    }
+
     @MainActor
     public var icon: NSImage {
         switch self {

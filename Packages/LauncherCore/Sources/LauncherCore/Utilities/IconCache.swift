@@ -32,8 +32,13 @@ public final class IconCache {
         }
 
         missCount += 1
-        // Load icon
-        let icon = NSWorkspace.shared.icon(forFile: url.path)
+
+        let icon: NSImage
+        if url == AppItem.settingsURL {
+            icon = NSApp.applicationIconImage
+        } else {
+            icon = NSWorkspace.shared.icon(forFile: url.path)
+        }
 
         // Store in cache (write)
         queue.async(flags: .barrier) { [weak self] in

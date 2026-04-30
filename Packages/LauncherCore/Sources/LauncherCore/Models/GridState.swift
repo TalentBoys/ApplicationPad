@@ -247,7 +247,7 @@ public final class GridState: ObservableObject {
             // Create new folder
             var apps = [app]
             apps.append(contentsOf: appsToAdd)
-            newItem = .folder(FolderItem(name: "Folder", apps: apps))
+            newItem = .folder(FolderItem(name: LauncherCoreStrings.defaultFolderName, apps: apps))
         case .empty:
             return false
         }

@@ -17,6 +17,9 @@ struct AppGridView: View {
     @State private var scrollMonitor: Any?
     @State private var pageWidth: CGFloat = 0
     @State private var scrollEndTimer: Timer?
+    @State private var scrollVelocity: CGFloat = 0
+    @State private var lastScrollTime: TimeInterval = 0
+    @State private var scrollGestureStartTime: TimeInterval = 0
     @FocusState private var isSearchFocused: Bool
 
     // Grid state manager (preview/stable dual-layer model)
@@ -147,7 +150,7 @@ struct AppGridView: View {
                     Spacer()
                         .frame(height: notchHeight)
                     // Search box
-                    TextField("Search applications", text: $searchText)
+                    TextField(L("Search applications"), text: $searchText)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 300)
                         .frame(height: searchHeight)
@@ -192,10 +195,7 @@ struct AppGridView: View {
                                                 onTap: {
                                                     handleItemTap(item: item, position: CGPoint(x: x, y: y))
                                                 },
-                                                onAppLaunch: {
-                                                    apps = AppScanner.scan()
-                                                    refreshGridItems()
-                                                }
+                                                onAppLaunch: {}
                                             )
                                             // Scale effect: all merge targets scale up when hovering/ready (folder preview effect)
                                             .scaleEffect(isMergeReadyTarget ? 1.15 : (isMergeHoveringTarget ? 1.1 : 1.0))
@@ -272,7 +272,6 @@ struct AppGridView: View {
                                 }
                             }
                             .offset(x: -CGFloat(currentPage) * geo.size.width + (draggingItem == nil ? dragOffset : 0))
-                            .animation(.easeInOut(duration: 0.3), value: currentPage)
 
                             // Dragging item overlay - rendered outside page system so it's always visible
                             if let dragging = draggingItem {
@@ -297,7 +296,7 @@ struct AppGridView: View {
                         }
                         .contentShape(Rectangle())
                         .simultaneousGesture(
-                            DragGesture(minimumDistance: 15)
+                            DragGesture(minimumDistance: 5)
                                 .onChanged { value in
                                     if draggingItem == nil {
                                         isDraggingPage = true
@@ -312,15 +311,28 @@ struct AppGridView: View {
                                 }
                                 .onEnded { value in
                                     if draggingItem == nil {
-                                        let threshold = geo.size.width * 0.2
+                                        let threshold = geo.size.width * 0.1
+                                        let velocityThreshold: CGFloat = 0.25
+                                        let predicted = value.predictedEndTranslation.width
+                                        let swipedLeft = value.translation.width < 0
+                                        let swipedRight = value.translation.width > 0
+                                        let fastSwipe = abs(predicted) > geo.size.width * velocityThreshold
 
-                                        withAnimation(.easeInOut(duration: 0.3)) {
-                                            if value.translation.width < -threshold && currentPage < totalPages - 1 {
+                                        if swipedLeft && (abs(value.translation.width) > threshold || fastSwipe) && currentPage < totalPages - 1 {
+                                            withAnimation(.easeOut(duration: 0.25)) {
+                                                dragOffset = 0
                                                 currentPage += 1
-                                            } else if value.translation.width > threshold && currentPage > 0 {
+                                            }
+                                        } else if swipedRight && (value.translation.width > threshold || fastSwipe) && currentPage > 0 {
+                                            withAnimation(.easeOut(duration: 0.25)) {
+                                                dragOffset = 0
                                                 currentPage -= 1
                                             }
-                                            dragOffset = 0
+                                        } else {
+                                            // Bounce back smoothly
+                                            withAnimation(.easeOut(duration: 0.25)) {
+                                                dragOffset = 0
+                                            }
                                         }
                                     }
                                     isDraggingPage = false
@@ -390,10 +402,7 @@ struct AppGridView: View {
                             dragIntoFolderTargetId = nil
                             dragIntoFolderTargetIndex = nil
                         },
-                        onAppLaunch: {
-                            apps = AppScanner.scan()
-                            refreshGridItems()
-                        },
+                        onAppLaunch: {},
                         onFolderUpdate: { updatedFolder in
                             updateFolder(updatedFolder)
                             // Also update openFolder so FolderContentView sees the changes
@@ -433,6 +442,24 @@ struct AppGridView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
             focusSearchField()
+            DispatchQueue.global(qos: .userInitiated).async {
+                let scanned = AppScanner.scan()
+                DispatchQueue.main.async {
+                    if scanned.map(\.id) != apps.map(\.id) {
+                        apps = scanned
+                        gridState.setStable(LauncherSettings.applyCustomOrder(to: apps))
+                    }
+                }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .customScanPathsChanged)) { _ in
+            apps = AppScanner.scan()
+            gridState.setStable(LauncherSettings.applyCustomOrder(to: apps))
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .gridLayoutDidReset)) { _ in
+            apps = AppScanner.scan()
+            gridState.setStable(LauncherSettings.applyCustomOrder(to: apps))
+            currentPage = 0
         }
     }
 
@@ -907,51 +934,108 @@ struct AppGridView: View {
 
     private func startScrollMonitor() {
         scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [self] event in
-            // Skip if folder is open - let folder handle its own scrolling
+            if LauncherAnimationState.shared.showSettings {
+                return event
+            }
             if openFolder != nil {
                 return event
             }
 
+            // Ignore momentum (inertia after finger lifts)
             if event.momentumPhase != [] {
                 return event
             }
 
+            let phase = event.phase
             let invert: CGFloat = LauncherSettings.invertScroll ? -1 : 1
             let sensitivity = LauncherSettings.scrollSensitivity
-
             let deltaX = event.scrollingDeltaX * invert * sensitivity
             let deltaY = event.scrollingDeltaY * invert * sensitivity
-
             let delta = deltaX - deltaY
 
-            guard abs(delta) > 0.1 else { return event }
+            // ─── Mouse scroll wheel (no phase) ───
+            // Each tick = one page, with cooldown to prevent skipping
+            if phase == [] {
+                guard abs(delta) > 0.1 else { return event }
+                let now = ProcessInfo.processInfo.systemUptime
+                let cooldown: TimeInterval = 0.25
+                let timeSinceLastPage = now - lastScrollTime
 
-            dragOffset += delta
-
-            let maxOffset = pageWidth > 0 ? pageWidth : 1000
-            dragOffset = max(-maxOffset, min(maxOffset, dragOffset))
-
-            if currentPage == 0 && dragOffset > 0 {
-                dragOffset = min(dragOffset, 100)
-            } else if currentPage == totalPages - 1 && dragOffset < 0 {
-                dragOffset = max(dragOffset, -100)
-            }
-
-            scrollEndTimer?.invalidate()
-            scrollEndTimer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: false) { _ in
-                DispatchQueue.main.async {
-                    let threshold = pageWidth * 0.15
-                    let currentDragOffset = dragOffset
-
-                    withAnimation(.easeOut(duration: 0.3)) {
-                        if currentDragOffset < -threshold && currentPage < totalPages - 1 {
+                if timeSinceLastPage >= cooldown {
+                    if delta < 0 && currentPage < totalPages - 1 {
+                        withAnimation(.easeOut(duration: 0.25)) {
                             currentPage += 1
-                        } else if currentDragOffset > threshold && currentPage > 0 {
+                        }
+                        lastScrollTime = now
+                    } else if delta > 0 && currentPage > 0 {
+                        withAnimation(.easeOut(duration: 0.25)) {
                             currentPage -= 1
                         }
+                        lastScrollTime = now
+                    }
+                }
+                return event
+            }
+
+            // ─── Trackpad (has phase) ───
+
+            // Gesture began - reset state
+            if phase == .began {
+                dragOffset = 0
+                scrollVelocity = 0
+                scrollGestureStartTime = ProcessInfo.processInfo.systemUptime
+            }
+
+            // Gesture ended (finger lifted) - decide page change
+            if phase == .ended || phase == .cancelled {
+                let distanceThreshold = (pageWidth > 0 ? pageWidth : 1000) * 0.12
+                let velocityThreshold: CGFloat = 80
+                let gestureTime = ProcessInfo.processInfo.systemUptime - scrollGestureStartTime
+
+                let shouldPageLeft = (dragOffset < -distanceThreshold) || (gestureTime < 0.4 && scrollVelocity < -velocityThreshold)
+                let shouldPageRight = (dragOffset > distanceThreshold) || (gestureTime < 0.4 && scrollVelocity > velocityThreshold)
+
+                if shouldPageLeft && currentPage < totalPages - 1 {
+                    withAnimation(.easeOut(duration: 0.25)) {
+                        dragOffset = 0
+                        currentPage += 1
+                    }
+                } else if shouldPageRight && currentPage > 0 {
+                    withAnimation(.easeOut(duration: 0.25)) {
+                        dragOffset = 0
+                        currentPage -= 1
+                    }
+                } else {
+                    withAnimation(.easeOut(duration: 0.25)) {
                         dragOffset = 0
                     }
                 }
+                scrollVelocity = 0
+                return event
+            }
+
+            // During gesture (.began or .changed) - accumulate offset
+            guard abs(delta) > 0.1 else { return event }
+
+            let now = ProcessInfo.processInfo.systemUptime
+            let dt = now - lastScrollTime
+            lastScrollTime = now
+
+            dragOffset += delta
+
+            if dt > 0 && dt < 0.5 {
+                scrollVelocity = delta / dt
+            }
+
+            // Clamp dragOffset for visual feedback
+            let maxDrag: CGFloat = pageWidth > 0 ? pageWidth * 0.5 : 500
+            dragOffset = max(-maxDrag, min(maxDrag, dragOffset))
+
+            // Edge rubber-band
+            if currentPage == 0 && dragOffset > 0 {
+                dragOffset = min(dragOffset, 50)
+            } else if currentPage == totalPages - 1 && dragOffset < 0 {
+                dragOffset = max(dragOffset, -50)
             }
 
             return event
@@ -1026,7 +1110,7 @@ struct GridItemView: View {
                     .animation(.easeOut(duration: 0.15), value: isHovered)
             }
 
-            Text(item.name)
+            Text(item.displayName)
                 .font(iconSize > 64 ? .callout : .caption)
                 .foregroundColor(.primary)
                 .lineLimit(1)
@@ -1042,10 +1126,21 @@ struct GridItemView: View {
         .onTapGesture {
             switch item {
             case .app(let app):
-                app.markUsed()
-                NSWorkspace.shared.open(app.url)
-                onAppLaunch()
-                LauncherPanel.shared.close()
+                if app.isSettingsItem {
+                    AppDelegate.shared?.openSettings()
+                } else {
+                    let tapTime = CFAbsoluteTimeGetCurrent()
+                    print("⏱️ [TAP] App tapped at: \(tapTime)")
+                    app.markUsed()
+                    print("⏱️ [MARK] markUsed done at: \(CFAbsoluteTimeGetCurrent()) (+\(CFAbsoluteTimeGetCurrent() - tapTime)s)")
+                    LauncherPanel.shared.close()
+                    print("⏱️ [CLOSE] close() called at: \(CFAbsoluteTimeGetCurrent()) (+\(CFAbsoluteTimeGetCurrent() - tapTime)s)")
+                    let url = app.url
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        NSWorkspace.shared.open(url)
+                        print("⏱️ [OPEN] open() done at: \(CFAbsoluteTimeGetCurrent()) (+\(CFAbsoluteTimeGetCurrent() - tapTime)s)")
+                    }
+                }
             case .folder:
                 onTap()
             case .empty:
@@ -1076,6 +1171,9 @@ struct FolderOverlayView: View {
     @State private var dragOffset: CGFloat = 0
     @State private var scrollMonitor: Any?
     @State private var scrollEndTimer: Timer?
+    @State private var scrollVelocity: CGFloat = 0
+    @State private var lastScrollTime: TimeInterval = 0
+    @State private var scrollGestureStartTime: TimeInterval = 0
 
     // Drag-to-reorder state for folder items (using GridState like launcher)
     @StateObject private var folderGridState = GridState()
@@ -1445,7 +1543,7 @@ struct FolderOverlayView: View {
                 VStack(spacing: 0) {
                     // Folder name (editable)
                     if isEditingName {
-                        TextField("Folder Name", text: $folderName)
+                        TextField(L("Folder Name"), text: $folderName)
                             .textFieldStyle(.roundedBorder)
                             .frame(width: 200)
                             .multilineTextAlignment(.center)
@@ -1498,11 +1596,17 @@ struct FolderOverlayView: View {
                                             app: app,
                                             iconSize: iconSize,
                                             onTap: {
-                                                app.markUsed()
-                                                NSWorkspace.shared.open(app.url)
-                                                onAppLaunch()
-                                                onClose()
-                                                LauncherPanel.shared.close()
+                                                if app.isSettingsItem {
+                                                    AppDelegate.shared?.openSettings()
+                                                } else {
+                                                    app.markUsed()
+                                                    onClose()
+                                                    LauncherPanel.shared.close()
+                                                    let url = app.url
+                                                    DispatchQueue.global(qos: .userInitiated).async {
+                                                        NSWorkspace.shared.open(url)
+                                                    }
+                                                }
                                             },
                                             onRemove: {
                                                 var updated = folder
@@ -1583,7 +1687,6 @@ struct FolderOverlayView: View {
                         }
                     }
                     .offset(x: -CGFloat(currentPage) * contentWidth + dragOffset)
-                    .animation(.easeInOut(duration: 0.3), value: currentPage)
 
                         // Dragging item overlay - rendered outside the HStack so it's not affected by page offset
                         if let dragging = draggingItem, case .app(let app) = dragging {
@@ -1607,12 +1710,10 @@ struct FolderOverlayView: View {
                     .contentShape(Rectangle())  // Enable hit testing on empty areas for drag gesture
                     .clipped()
                     .gesture(
-                        DragGesture(minimumDistance: 15)
+                        DragGesture(minimumDistance: 5)
                             .onChanged { value in
-                                // Only handle page swipe if not dragging an item
                                 if draggingItem == nil {
                                     dragOffset = value.translation.width
-                                    // Rubber-band effect at edges
                                     if currentPage == 0 && dragOffset > 0 {
                                         dragOffset = min(dragOffset, 50)
                                     } else if currentPage == totalPages - 1 && dragOffset < 0 {
@@ -1621,16 +1722,28 @@ struct FolderOverlayView: View {
                                 }
                             }
                             .onEnded { value in
-                                // Only handle page swipe if not dragging an item
                                 if draggingItem == nil {
-                                    let threshold = contentWidth * 0.2
-                                    withAnimation(.easeInOut(duration: 0.3)) {
-                                        if value.translation.width < -threshold && currentPage < totalPages - 1 {
+                                    let threshold = contentWidth * 0.1
+                                    let velocityThreshold: CGFloat = 0.25
+                                    let predicted = value.predictedEndTranslation.width
+                                    let swipedLeft = value.translation.width < 0
+                                    let swipedRight = value.translation.width > 0
+                                    let fastSwipe = abs(predicted) > contentWidth * velocityThreshold
+
+                                    if swipedLeft && (abs(value.translation.width) > threshold || fastSwipe) && currentPage < totalPages - 1 {
+                                        withAnimation(.easeOut(duration: 0.25)) {
+                                            dragOffset = 0
                                             currentPage += 1
-                                        } else if value.translation.width > threshold && currentPage > 0 {
+                                        }
+                                    } else if swipedRight && (value.translation.width > threshold || fastSwipe) && currentPage > 0 {
+                                        withAnimation(.easeOut(duration: 0.25)) {
+                                            dragOffset = 0
                                             currentPage -= 1
                                         }
-                                        dragOffset = 0
+                                    } else {
+                                        withAnimation(.easeOut(duration: 0.25)) {
+                                            dragOffset = 0
+                                        }
                                     }
                                 }
                             }
@@ -1728,28 +1841,96 @@ struct FolderOverlayView: View {
 
     private func startFolderScrollMonitor() {
         scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [self] event in
+            if LauncherAnimationState.shared.showSettings {
+                return event
+            }
             if event.momentumPhase != [] {
                 return event
             }
 
-            // Only handle if folder has multiple pages
             guard totalPages > 1 else { return event }
 
+            let phase = event.phase
+            let contentWidth = launcherCellWidth * CGFloat(folderColumns)
             let invert: CGFloat = LauncherSettings.invertScroll ? -1 : 1
             let sensitivity = LauncherSettings.scrollSensitivity
-
             let deltaX = event.scrollingDeltaX * invert * sensitivity
             let deltaY = event.scrollingDeltaY * invert * sensitivity
-
             let delta = deltaX - deltaY
 
+            // ─── Mouse scroll wheel (no phase) ───
+            if phase == [] {
+                guard abs(delta) > 0.1 else { return event }
+                let now = ProcessInfo.processInfo.systemUptime
+                let cooldown: TimeInterval = 0.25
+                let timeSinceLastPage = now - lastScrollTime
+
+                if timeSinceLastPage >= cooldown {
+                    if delta < 0 && currentPage < totalPages - 1 {
+                        withAnimation(.easeOut(duration: 0.25)) {
+                            currentPage += 1
+                        }
+                        lastScrollTime = now
+                    } else if delta > 0 && currentPage > 0 {
+                        withAnimation(.easeOut(duration: 0.25)) {
+                            currentPage -= 1
+                        }
+                        lastScrollTime = now
+                    }
+                }
+                return nil
+            }
+
+            // ─── Trackpad (has phase) ───
+
+            if phase == .began {
+                dragOffset = 0
+                scrollVelocity = 0
+                scrollGestureStartTime = ProcessInfo.processInfo.systemUptime
+            }
+
+            if phase == .ended || phase == .cancelled {
+                let distanceThreshold = (contentWidth > 0 ? contentWidth : 500) * 0.12
+                let velocityThreshold: CGFloat = 80
+                let gestureTime = ProcessInfo.processInfo.systemUptime - scrollGestureStartTime
+
+                let shouldPageLeft = (dragOffset < -distanceThreshold) || (gestureTime < 0.4 && scrollVelocity < -velocityThreshold)
+                let shouldPageRight = (dragOffset > distanceThreshold) || (gestureTime < 0.4 && scrollVelocity > velocityThreshold)
+
+                if shouldPageLeft && currentPage < totalPages - 1 {
+                    withAnimation(.easeOut(duration: 0.25)) {
+                        dragOffset = 0
+                        currentPage += 1
+                    }
+                } else if shouldPageRight && currentPage > 0 {
+                    withAnimation(.easeOut(duration: 0.25)) {
+                        dragOffset = 0
+                        currentPage -= 1
+                    }
+                } else {
+                    withAnimation(.easeOut(duration: 0.25)) {
+                        dragOffset = 0
+                    }
+                }
+                scrollVelocity = 0
+                return nil
+            }
+
+            // During gesture - accumulate offset
             guard abs(delta) > 0.1 else { return event }
 
-            let contentWidth = launcherCellWidth * CGFloat(folderColumns)
+            let now = ProcessInfo.processInfo.systemUptime
+            let dt = now - lastScrollTime
+            lastScrollTime = now
+
             dragOffset += delta
 
-            let maxOffset = contentWidth > 0 ? contentWidth : 500
-            dragOffset = max(-maxOffset, min(maxOffset, dragOffset))
+            if dt > 0 && dt < 0.5 {
+                scrollVelocity = delta / dt
+            }
+
+            let maxDrag = (contentWidth > 0 ? contentWidth : 500) * 0.5
+            dragOffset = max(-maxDrag, min(maxDrag, dragOffset))
 
             if currentPage == 0 && dragOffset > 0 {
                 dragOffset = min(dragOffset, 50)
@@ -1757,24 +1938,7 @@ struct FolderOverlayView: View {
                 dragOffset = max(dragOffset, -50)
             }
 
-            scrollEndTimer?.invalidate()
-            scrollEndTimer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: false) { _ in
-                DispatchQueue.main.async {
-                    let threshold = contentWidth * 0.15
-                    let currentDragOffset = dragOffset
-
-                    withAnimation(.easeOut(duration: 0.3)) {
-                        if currentDragOffset < -threshold && currentPage < totalPages - 1 {
-                            currentPage += 1
-                        } else if currentDragOffset > threshold && currentPage > 0 {
-                            currentPage -= 1
-                        }
-                        dragOffset = 0
-                    }
-                }
-            }
-
-            return nil  // Consume the event so it doesn't propagate
+            return nil
         }
     }
 
@@ -1807,18 +1971,27 @@ struct FolderOverlayView: View {
 
     @ViewBuilder
     private func folderBackground(folderWidth: CGFloat, folderHeight: CGFloat) -> some View {
-        ZStack {
-            // Main folder background with blur
-            RoundedRectangle(cornerRadius: 20)
-                .fill(Color.clear)
-                .background(
-                    VisualEffectView()
-                        .clipShape(RoundedRectangle(cornerRadius: 20))
-                )
-
-            // DEBUG: Folder visual area (blue) - entire folder bounds
-//            RoundedRectangle(cornerRadius: 20)
-//                .fill(Color.blue.opacity(0.3))
+        let isClassic = UserDefaults.standard.string(forKey: "panelStyle") == "classicBlur"
+        return ZStack {
+            if isClassic {
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(Color.white.opacity(0.15))
+                    .background(
+                        .ultraThinMaterial,
+                        in: RoundedRectangle(cornerRadius: 20)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20)
+                            .stroke(Color.white.opacity(0.3), lineWidth: 0.5)
+                    )
+            } else {
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(Color.clear)
+                    .background(
+                        VisualEffectView()
+                            .clipShape(RoundedRectangle(cornerRadius: 20))
+                    )
+            }
         }
     }
 
@@ -1866,7 +2039,7 @@ struct FolderAppItemView: View {
                 .scaleEffect(isHovered ? 1.1 : 1.0)
                 .animation(.easeOut(duration: 0.15), value: isHovered)
 
-            Text(app.name)
+            Text(app.displayName)
                 .font(.caption)
                 .foregroundColor(.primary)
                 .lineLimit(1)

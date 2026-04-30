@@ -10,5 +10,11 @@
 	<string>public.app-category.utilities</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright © 2026 Kris Jin. All rights reserved.</string>
+	<key>SUFeedURL</key>
+	<string>https://applicationpad.cfapps.eu12.hana.ondemand.com/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>8e8+RtbOx6qf+9hyCUsib6NjJP6p8paSjTDCYADPRX8=</string>
+	<key>SUEnableInstallerLauncherService</key>
+	<true/>
 </dict>
 </plist>
